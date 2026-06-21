@@ -201,8 +201,45 @@ class ComplicatedBranchyCNN(nn.Module):
 
         return out
 
-model = ComplicatedBranchyCNN()
-summary = model_summary(model, torch.randn(2, 3, 32, 32))
+class MultiInputModel(nn.Module):
+    def __init__(self):
+        super(MultiInputModel, self).__init__()
+        
+        # Sub-network 1: Image Processing (CNN)
+        self.cnn_path = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Flatten() # Flattens to (batch_size, 16 * 32 * 32) assuming 64x64 input
+        )
+        
+        # Sub-network 2: Tabular Processing (MLP)
+        self.mlp_path = nn.Sequential(
+            nn.Linear(in_features=10, out_features=32),
+            nn.ReLU()
+        )
+        
+        # Final Classifier: Combined feature size = 16384 (CNN) + 32 (MLP)
+        self.classifier = nn.Sequential(
+            nn.Linear(in_features=(16 * 32 * 32) + 32, out_features=64),
+            nn.ReLU(),
+            nn.Linear(in_features=64, out_features=2) # 2 output classes
+        )
+
+    def forward(self, image_input, tabular_input):
+        # 1. Process paths independently
+        x1 = self.cnn_path(image_input)
+        x2 = self.mlp_path(tabular_input)
+        
+        # 2. Concatenate along the feature dimension (dim=1)
+        combined = torch.cat((x1, x2), dim=1)
+        
+        # 3. Final classification
+        output = self.classifier(combined)
+        return output
+
+model = MultiInputModel()
+summary = model_summary(model, torch.randn(8, 3, 64, 64), torch.randn(8, 10))
 # Save output to frontend/public/branchy.json
-with open("frontend/public/branchy.json", "w") as f:
+with open("frontend/public/branchy1.json", "w") as f:
     json.dump(summary, f)

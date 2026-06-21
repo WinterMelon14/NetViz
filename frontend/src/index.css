@@ -42,6 +42,7 @@
   --grid-line: rgba(66, 108, 152, 0.12);
   --grid-dot: rgba(66, 108, 152, 0.24);
   --edge: #315d8c;
+  --edge-streak: #d7f6ff;
   --accent: #2ba8ff;
   --accent-soft: rgba(43, 168, 255, 0.15);
   --accent-glow: rgba(43, 168, 255, 0.42);
@@ -83,6 +84,7 @@
   --grid-line: rgba(64, 111, 158, 0.14);
   --grid-dot: rgba(64, 111, 158, 0.24);
   --edge: #7195ba;
+  --edge-streak: #ffffff;
   --accent: #0b78d0;
   --accent-soft: rgba(11, 120, 208, 0.12);
   --accent-glow: rgba(11, 120, 208, 0.24);

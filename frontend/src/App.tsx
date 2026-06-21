@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, PointerEvent, WheelEvent } from 'react'
+import type { ChangeEvent, PointerEvent, ReactNode, WheelEvent } from 'react'
 import './App.css'
 
 type TensorSummary = {
@@ -66,15 +66,6 @@ type TraceEdge = {
   target_input: number
 }
 
-type TraceEvent = {
-  step: number
-  phase: string
-  event: string
-  node: string
-  inputs: { node: string; output: number }[]
-  outputs: { node: string; output: number }[]
-}
-
 type TraceStats = {
   total_nodes?: number
   total_edges?: number
@@ -99,8 +90,14 @@ type TracePayload = {
     nodes: TraceNode[]
     edges: TraceEdge[]
   }
-  events?: TraceEvent[]
 }
+
+type NodePosition = {
+  x: number
+  y: number
+}
+
+type LayoutPositions = Record<string, NodePosition>
 
 const nodeWidth = 244
 const nodeHeight = 148
@@ -109,6 +106,7 @@ const rowGap = 72
 const padding = 64
 const minScale = 0.25
 const maxScale = 2.4
+const whiteboardPadding = 1800
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -163,6 +161,46 @@ function parseTraceJson(text: string) {
     throw new Error('JSON must include graph.nodes and graph.edges.')
   }
   return payload
+}
+
+function hashTrace(payload: TracePayload) {
+  const source = JSON.stringify({
+    model_name: payload.model_name,
+    nodes: payload.graph.nodes.map((node) => node.id),
+    edges: payload.graph.edges.map((edge) => [edge.source, edge.target, edge.source_output, edge.target_input]),
+  })
+  let hash = 5381
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 33) ^ source.charCodeAt(index)
+  }
+
+  return (hash >>> 0).toString(36)
+}
+
+function layoutStorageKey(payload: TracePayload) {
+  return `trace-layout:${hashTrace(payload)}`
+}
+
+function loadStoredPositions(payload: TracePayload): LayoutPositions {
+  try {
+    const stored = window.localStorage.getItem(layoutStorageKey(payload))
+    if (!stored) return {}
+    const parsed = JSON.parse(stored) as { layout?: { positions?: LayoutPositions } }
+    return parsed.layout?.positions ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function saveStoredPositions(payload: TracePayload, positions: LayoutPositions) {
+  const key = layoutStorageKey(payload)
+  if (!Object.keys(positions).length) {
+    window.localStorage.removeItem(key)
+    return
+  }
+
+  window.localStorage.setItem(key, JSON.stringify({ layout: { positions } }))
 }
 
 function totalParamLabel(node: TraceNode) {
@@ -252,6 +290,17 @@ function InfoRow({ label, value }: { label: string; value: unknown }) {
   )
 }
 
+function CollapsibleSection({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
+  return (
+    <details className="collapse-section" open={defaultOpen}>
+      <summary>
+        <h3>{title}</h3>
+      </summary>
+      <div className="collapse-body">{children}</div>
+    </details>
+  )
+}
+
 function TensorDetail({ title, value }: { title: string; value: TensorValue }) {
   return (
     <section className="detail-block">
@@ -279,7 +328,6 @@ function ParamsDetail({ params }: { params?: ParamsInfo }) {
 
   return (
     <section className="detail-block">
-      <h3>Params</h3>
       {shapes.length ? shapes.map(([name, shape]) => <InfoRow key={name} label={name} value={formatShape(shape)} />) : <p className="empty-note">No parameter tensors</p>}
       <InfoRow label="count" value={(params?.count ?? 0).toLocaleString()} />
       <InfoRow label="memory" value={params?.memory?.human ?? '0 B'} />
@@ -296,32 +344,32 @@ function ModelSummary({ trace }: { trace: TracePayload }) {
         <p className="eyebrow">Model Summary</p>
         <h2>{trace.model_name}</h2>
       </header>
-      <section className="metric-grid">
-        <div>
-          <span>Nodes</span>
-          <strong>{stats?.total_nodes ?? trace.graph.nodes.length}</strong>
-        </div>
-        <div>
-          <span>Edges</span>
-          <strong>{stats?.total_edges ?? trace.graph.edges.length}</strong>
-        </div>
-        <div>
-          <span>Params</span>
-          <strong>{(stats?.total_params ?? 0).toLocaleString()}</strong>
-        </div>
-        <div>
-          <span>Activations</span>
-          <strong>{stats?.total_activation_memory?.human ?? 'n/a'}</strong>
-        </div>
-      </section>
-      <section className="detail-block">
-        <h3>Memory</h3>
+      <CollapsibleSection title="Overview">
+        <section className="metric-grid">
+          <div>
+            <span>Nodes</span>
+            <strong>{stats?.total_nodes ?? trace.graph.nodes.length}</strong>
+          </div>
+          <div>
+            <span>Edges</span>
+            <strong>{stats?.total_edges ?? trace.graph.edges.length}</strong>
+          </div>
+          <div>
+            <span>Params</span>
+            <strong>{(stats?.total_params ?? 0).toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Activations</span>
+            <strong>{stats?.total_activation_memory?.human ?? 'n/a'}</strong>
+          </div>
+        </section>
+      </CollapsibleSection>
+      <CollapsibleSection title="Memory">
         <InfoRow label="param memory" value={stats?.total_param_memory?.human ?? 'n/a'} />
         <InfoRow label="trainable params" value={(stats?.trainable_params ?? 0).toLocaleString()} />
         <InfoRow label="non-trainable" value={(stats?.non_trainable_params ?? 0).toLocaleString()} />
-      </section>
-      <section className="detail-block">
-        <h3>Inputs</h3>
+      </CollapsibleSection>
+      <CollapsibleSection title="Inputs">
         {stats?.input_specs?.length ? (
           stats.input_specs.map((input) => (
             <div className="input-spec" key={`${input.index}-${input.name}`}>
@@ -334,7 +382,7 @@ function ModelSummary({ trace }: { trace: TracePayload }) {
         ) : (
           <p className="empty-note">No input specs found in stats.</p>
         )}
-      </section>
+      </CollapsibleSection>
     </>
   )
 }
@@ -362,30 +410,34 @@ function NodeInspector({ node }: { node: TraceNode }) {
       </header>
 
       {attrEntries.length ? (
-        <section className="detail-block">
-          <h3>Attributes</h3>
+        <CollapsibleSection title="Attributes">
           {attrEntries.map(([key, value]) => (
             <InfoRow key={key} label={key} value={value} />
           ))}
-        </section>
+        </CollapsibleSection>
       ) : null}
 
-      <section className="formula-block">
-        <h3>Formula</h3>
-        <p>{node.formula ?? node.fx_op}</p>
-      </section>
+      <CollapsibleSection title="Formula">
+        <section className="formula-block">
+          <p>{node.formula ?? node.fx_op}</p>
+        </section>
+      </CollapsibleSection>
 
-      <section className="stack-block">
-        <h3>Inputs</h3>
+      <CollapsibleSection title="Inputs">
+        <section className="stack-block">
         {tensorInputs.length ? tensorInputs.map((input) => <TensorDetail key={input.index} title={`${input.index}`} value={input} />) : <p className="empty-note">No tensor inputs</p>}
-      </section>
+        </section>
+      </CollapsibleSection>
 
-      <section className="stack-block">
-        <h3>Output</h3>
+      <CollapsibleSection title="Output">
+        <section className="stack-block">
         {tensorOutputs.length ? tensorOutputs.map((output) => <TensorDetail key={output.index} title={`${output.index}`} value={output} />) : <p className="empty-note">No tensor outputs</p>}
-      </section>
+        </section>
+      </CollapsibleSection>
 
-      <ParamsDetail params={node.params} />
+      <CollapsibleSection title="Params">
+        <ParamsDetail params={node.params} />
+      </CollapsibleSection>
     </>
   )
 }
@@ -394,11 +446,9 @@ function App() {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragRef = useRef({ active: false, x: 0, y: 0, moved: false })
+  const nodeDragRef = useRef({ active: false, nodeId: '', x: 0, y: 0, moved: false })
   const [trace, setTrace] = useState<TracePayload | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
-  const [activeStep, setActiveStep] = useState(-1)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [speed, setSpeed] = useState(1)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [view, setView] = useState({ x: 36, y: 36, scale: 1 })
@@ -406,6 +456,7 @@ function App() {
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
   const [jsonText, setJsonText] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [layoutPositions, setLayoutPositions] = useState<LayoutPositions>({})
 
   useEffect(() => {
     fetch('/branchy.json')
@@ -415,27 +466,38 @@ function App() {
       })
       .then((payload) => {
         setTrace(payload)
+        setLayoutPositions(loadStoredPositions(payload))
         setSelectedNodeId(null)
-        setActiveStep(-1)
       })
       .catch((loadError: Error) => setError(loadError.message))
   }, [])
 
   const layout = useMemo(() => (trace ? buildLayout(trace.graph.nodes, trace.graph.edges) : null), [trace])
-  const nodesById = useMemo(() => new Map(layout?.nodes.map((node) => [node.id, node]) ?? []), [layout])
-  const playbackLevels = useMemo(() => {
-    const levels = new Map<number, string[]>()
-    layout?.nodes.forEach((node) => {
-      levels.set(node.depth, [...(levels.get(node.depth) ?? []), node.id])
-    })
-    return Array.from(levels.entries())
-      .sort(([left], [right]) => left - right)
-      .map(([, nodeIds]) => nodeIds)
-  }, [layout])
-  const activeNodeIds = new Set(activeStep >= 0 ? playbackLevels[activeStep] ?? [] : [])
-  const playbackNode = activeNodeIds.size ? nodesById.get(Array.from(activeNodeIds)[0]) : undefined
+  const layoutNodes = useMemo(() => {
+    return (
+      layout?.nodes.map((node) => ({
+        ...node,
+        x: layoutPositions[node.id]?.x ?? node.x,
+        y: layoutPositions[node.id]?.y ?? node.y,
+      })) ?? []
+    )
+  }, [layout, layoutPositions])
+  const nodesById = useMemo(() => new Map(layoutNodes.map((node) => [node.id, node])), [layoutNodes])
   const selectedNode = selectedNodeId ? nodesById.get(selectedNodeId) : undefined
-  const inspectorNode = selectedNode ?? playbackNode
+  const inspectorNode = selectedNode
+  const stageBounds = useMemo(() => {
+    const xs = layoutNodes.map((node) => node.x)
+    const ys = layoutNodes.map((node) => node.y)
+    const minX = Math.min(0, ...xs)
+    const minY = Math.min(0, ...ys)
+    const maxX = Math.max(layout?.width ?? 0, ...layoutNodes.map((node) => node.x + nodeWidth))
+    const maxY = Math.max(layout?.height ?? 0, ...layoutNodes.map((node) => node.y + nodeHeight))
+
+    return {
+      width: Math.max(4000, maxX - minX + whiteboardPadding),
+      height: Math.max(3000, maxY - minY + whiteboardPadding),
+    }
+  }, [layout?.height, layout?.width, layoutNodes])
 
   function fitView() {
     if (!layout || !viewportRef.current) return
@@ -451,31 +513,17 @@ function App() {
   function resetView() {
     setView({ x: 36, y: 36, scale: 1 })
     setSelectedNodeId(null)
-    setActiveStep(-1)
-    setIsPlaying(false)
   }
-
-  useEffect(() => {
-    if (!isPlaying || !playbackLevels.length) return undefined
-    const delay = 900 / speed
-    const timer = window.setInterval(() => {
-      setActiveStep((step) => {
-        const next = step < 0 ? 0 : step + 1
-        if (next >= playbackLevels.length) {
-          setIsPlaying(false)
-          return playbackLevels.length - 1
-        }
-        return next
-      })
-    }, delay)
-
-    return () => window.clearInterval(timer)
-  }, [isPlaying, playbackLevels.length, speed])
 
   useEffect(() => {
     const timer = window.setTimeout(fitView, 50)
     return () => window.clearTimeout(timer)
   }, [layout?.width, layout?.height])
+
+  useEffect(() => {
+    if (!trace) return
+    saveStoredPositions(trace, layoutPositions)
+  }, [layoutPositions, trace])
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     dragRef.current = { active: true, x: event.clientX, y: event.clientY, moved: false }
@@ -496,6 +544,36 @@ function App() {
     dragRef.current.active = false
   }
 
+  function onNodePointerDown(event: PointerEvent<HTMLButtonElement>, nodeId: string) {
+    event.stopPropagation()
+    nodeDragRef.current = { active: true, nodeId, x: event.clientX, y: event.clientY, moved: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function onNodePointerMove(event: PointerEvent<HTMLButtonElement>) {
+    if (!nodeDragRef.current.active || !layout) return
+    const dx = (event.clientX - nodeDragRef.current.x) / view.scale
+    const dy = (event.clientY - nodeDragRef.current.y) / view.scale
+    if (Math.abs(dx) + Math.abs(dy) > 1) nodeDragRef.current.moved = true
+    nodeDragRef.current.x = event.clientX
+    nodeDragRef.current.y = event.clientY
+
+    const node = nodesById.get(nodeDragRef.current.nodeId)
+    if (!node) return
+
+    setLayoutPositions((current) => ({
+      ...current,
+      [node.id]: {
+        x: node.x + dx,
+        y: node.y + dy,
+      },
+    }))
+  }
+
+  function onNodePointerUp() {
+    nodeDragRef.current.active = false
+  }
+
   function onWheel(event: WheelEvent<HTMLDivElement>) {
     event.preventDefault()
     const rect = event.currentTarget.getBoundingClientRect()
@@ -512,18 +590,15 @@ function App() {
   }
 
   function selectNode(nodeId: string) {
+    if (nodeDragRef.current.moved) return
     setSelectedNodeId(nodeId)
-    const levelIndex = playbackLevels.findIndex((level) => level.includes(nodeId))
-    setActiveStep(levelIndex)
-    setIsPlaying(false)
     setIsInspectorOpen(true)
   }
 
   function applyTracePayload(payload: TracePayload) {
     setTrace(payload)
+    setLayoutPositions(loadStoredPositions(payload))
     setSelectedNodeId(null)
-    setActiveStep(-1)
-    setIsPlaying(false)
     setError(null)
     setLoadError(null)
   }
@@ -554,9 +629,11 @@ function App() {
     }
   }
 
-  function setStep(step: number) {
-    setSelectedNodeId(null)
-    setActiveStep(clamp(step, 0, Math.max(playbackLevels.length - 1, 0)))
+  function resetLayout() {
+    if (trace) {
+      window.localStorage.removeItem(layoutStorageKey(trace))
+    }
+    setLayoutPositions({})
   }
 
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
@@ -572,6 +649,7 @@ function App() {
         <div className="toolbar">
           <button type="button" onClick={() => setIsLoadModalOpen(true)}>Load JSON</button>
           <button type="button" onClick={resetView}>Reset</button>
+          <button type="button" onClick={resetLayout}>Reset Layout</button>
           <button type="button" onClick={fitView}>Fit Graph</button>
           <button type="button" onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
         </div>
@@ -588,13 +666,8 @@ function App() {
           onWheel={onWheel}
         >
           <div className="graph-transform" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
-            <div className="graph-stage" style={{ width: layout.width, height: layout.height }}>
-              <svg className="edge-layer" width={layout.width} height={layout.height} aria-hidden="true">
-                <defs>
-                  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" />
-                  </marker>
-                </defs>
+            <div className="graph-stage" style={{ width: stageBounds.width, height: stageBounds.height }}>
+              <svg className="edge-layer" width={stageBounds.width} height={stageBounds.height} aria-hidden="true">
                 {trace.graph.edges.map((edge) => {
                   const source = nodesById.get(edge.source)
                   const target = nodesById.get(edge.target)
@@ -605,32 +678,36 @@ function App() {
                   const endY = target.y + nodeHeight / 2
                   const curve = Math.max(60, (endX - startX) / 2)
                   const isSelected = selectedNodeId === edge.source
-                  const isOutgoing = activeNodeIds.has(edge.source)
+
+                  const path = `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`
 
                   return (
-                    <path
-                      key={edge.id}
-                      className={`edge ${isSelected ? 'edge--selected' : ''} ${isOutgoing ? 'edge--pulse' : ''}`}
-                      d={`M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`}
-                      markerEnd="url(#arrow)"
-                    />
+                    <g key={edge.id}>
+                      <path
+                        className={`edge ${isSelected ? 'edge--active' : ''}`}
+                        d={path}
+                      />
+                      {isSelected ? <path className="edge-streak" d={path} /> : null}
+                    </g>
                   )
                 })}
               </svg>
 
-              {layout.nodes.map((node) => {
+              {layoutNodes.map((node) => {
                 const input = primaryInput(node)
                 const output = primaryOutput(node)
                 const isSelected = node.id === selectedNodeId
-                const isActive = activeNodeIds.has(node.id)
 
                 return (
                   <button
                     key={node.id}
                     type="button"
-                    className={`graph-node ${isSelected ? 'graph-node--selected' : ''} ${isActive ? 'graph-node--active' : ''}`}
+                    className={`graph-node ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
                     style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
-                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => onNodePointerDown(event, node.id)}
+                    onPointerMove={onNodePointerMove}
+                    onPointerUp={onNodePointerUp}
+                    onPointerCancel={onNodePointerUp}
                     onClick={() => selectNode(node.id)}
                   >
                     <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span>
@@ -663,35 +740,6 @@ function App() {
       >
         {isInspectorOpen ? '>' : '<'}
       </button>
-
-      <footer className="timeline">
-        <div className="timeline-controls">
-          <button type="button" onClick={() => { setActiveStep(-1); setSelectedNodeId(null); setIsPlaying(false) }}>Reset</button>
-          <button type="button" onClick={() => setStep(activeStep <= 0 ? 0 : activeStep - 1)}>Prev</button>
-          <button type="button" onClick={() => { setSelectedNodeId(null); setIsPlaying((playing) => !playing) }}>{isPlaying ? 'Pause' : 'Play'}</button>
-          <button type="button" onClick={() => setStep(activeStep < 0 ? 0 : activeStep + 1)}>Next</button>
-          <label>
-            Speed
-            <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
-              <option value={0.5}>0.5x</option>
-              <option value={1}>1x</option>
-              <option value={1.5}>1.5x</option>
-              <option value={2}>2x</option>
-            </select>
-          </label>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={Math.max(playbackLevels.length - 1, 0)}
-          value={activeStep < 0 ? 0 : activeStep}
-          onChange={(event) => setStep(Number(event.target.value))}
-        />
-        <div className="timeline-readout">
-          <span>{activeStep < 0 ? 'summary' : `level ${activeStep}`}</span>
-          <strong>{activeNodeIds.size ? Array.from(activeNodeIds).join(' + ') : 'model'}</strong>
-        </div>
-      </footer>
 
       {isLoadModalOpen ? (
         <div className="modal-backdrop" role="presentation">
