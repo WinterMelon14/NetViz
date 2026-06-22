@@ -410,6 +410,177 @@ function explainGeneric(node: TraceNodeForExplanation): Explanation | null {
   }
 }
 
+function explainLayerNorm(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const rawNormalizedShape = node.attrs?.normalized_shape
+  const normDims = Array.isArray(rawNormalizedShape) ? rawNormalizedShape.map(Number) : inputShape.slice(-1)
+  const eps = node.attrs?.eps ?? 1e-5
+
+  return {
+    title: 'LayerNorm',
+    short: `Normalizes over the trailing ${normDims.length} dimension${normDims.length === 1 ? '' : 's'} (${shapeText(normDims)}); shape is unchanged.`,
+    description: `LayerNorm normalizes each sample independently across the trailing dimensions ${shapeText(
+      normDims,
+    )} by subtracting the mean and dividing by the standard deviation (eps=${eps}). It then applies a learned per-element scale and shift. Other dimensions (e.g. batch) are normalized independently, and the shape never changes.`,
+    formula: {
+      display: 'out = (x - mean) / sqrt(var + eps) * weight + bias',
+      substitution: `mean/var computed over the last ${normDims.length} dim(s): ${shapeText(normDims)}`,
+    },
+    shapeSteps: [
+      {
+        label: 'Shape',
+        from: shapeText(inputShape),
+        to: shapeText(outputShape),
+        reason: 'LayerNorm only rescales values; it never changes the tensor shape.',
+      },
+    ],
+  }
+}
+
+function explainGELU(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape && !outputShape) return null
+
+  const approximate = node.attrs?.approximate ?? 'none'
+
+  return {
+    title: 'GELU',
+    short: 'Applies the Gaussian Error Linear Unit activation element-wise; shape is unchanged.',
+    description: `GELU smoothly scales each input value by the standard normal CDF at that value, behaving like a smoother version of ReLU.${
+      approximate !== 'none' ? ` Using the '${approximate}' approximation for speed.` : ''
+    } It's applied element-wise, so the shape never changes.`,
+    formula: {
+      display:
+        approximate === 'tanh'
+          ? 'out ≈ 0.5x * (1 + tanh(sqrt(2/pi) * (x + 0.044715x^3)))'
+          : 'out = x * Phi(x)',
+    },
+    shapeSteps: [
+      {
+        label: 'Shape',
+        from: shapeText(inputShape),
+        to: shapeText(outputShape ?? inputShape),
+        reason: 'GELU is an element-wise activation; it never changes the tensor shape.',
+      },
+    ],
+  }
+}
+
+function explainDropout(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape && !outputShape) return null
+
+  const p = Number(node.attrs?.p ?? 0.5)
+  const training = node.attrs?.training ?? true
+  const pct = Math.round(p * 100)
+
+  return {
+    title: 'Dropout',
+    short: training
+      ? `Randomly zeroes ~${pct}% of values during training; shape is unchanged.`
+      : 'Inactive in eval mode',
+    description: training
+      ? `Dropout independently zeroes each element with probability p=${p}, then scales the remaining values by 1/(1-p) so the expected sum is preserved. This is a regularization technique active only during training; the shape never changes.`
+      : `Dropout is a no-op outside of training mode (model.eval()). The input passes through unchanged. With p=${p}, it would zero elements with that probability during training.`,
+    formula: {
+      display: training ? `out = mask * x / (1 - p), p=${p}` : 'out = x',
+    },
+    shapeSteps: [
+      {
+        label: 'Shape',
+        from: shapeText(inputShape),
+        to: shapeText(outputShape ?? inputShape),
+        reason: 'Dropout zeroes individual values; it never changes the tensor shape.',
+      },
+    ],
+  }
+}
+
+function explainBatchNorm2d(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape || inputShape.length < 4) return null
+
+  const [n, c, h, w] = inputShape
+  const eps = node.attrs?.eps ?? 1e-5
+  const training = node.attrs?.training ?? false
+
+  return {
+    title: 'BatchNorm2d',
+    short: `Normalizes each of the ${c} channels independently across batch and spatial dims; shape is unchanged.`,
+    description: `BatchNorm2d normalizes each channel using ${
+      training ? 'statistics computed from the current batch' : 'stored running mean/variance from training'
+    }. It subtracts the mean and divides by the standard deviation (eps=${eps}) across N=${n}, H=${h}, W=${w} for each channelm then applies a learned per-channel scale and shift. The shape never changes.`,
+    formula: {
+      display: 'out = (x - running_mean) / sqrt(running_var + eps) * weight + bias',
+      substitution: `stats computed per-channel over N=${n}, H=${h}, W=${w}`,
+    },
+    shapeSteps: [
+      {
+        label: 'Shape',
+        from: shapeText(inputShape),
+        to: shapeText(outputShape),
+        reason: 'BatchNorm2d only rescales values per channel; it never changes the tensor shape.',
+      },
+    ],
+  }
+}
+
+function explainPad(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const rawPad = node.attrs?.pad ?? node.attrs?.padding ?? []
+  const pad = Array.isArray(rawPad) ? rawPad.map(Number) : []
+  const mode = node.attrs?.mode ?? 'constant'
+  const value = node.attrs?.value ?? 0
+
+  // pad list applies from the last dimension backwards: [left_-1, right_-1, left_-2, right_-2, ...]
+  const numPaddedDims = Math.floor(pad.length / 2)
+  const dimSteps = []
+  for (let i = 0; i < numPaddedDims; i++) {
+    const dimIndex = inputShape.length - 1 - i
+    const before = pad[i * 2]
+    const after = pad[i * 2 + 1]
+    dimSteps.push({
+      label: `Dimension ${dimIndex}`,
+      from: inputShape[dimIndex],
+      to: outputShape[dimIndex],
+      substitution: `${inputShape[dimIndex]} + ${before} (before) + ${after} (after) = ${outputShape[dimIndex]}`,
+    })
+  }
+  dimSteps.reverse()
+
+  return {
+    title: 'pad',
+    short: `Pads ${shapeText(inputShape)} to ${shapeText(outputShape)} using mode='${mode}'.`,
+    description: `pad adds values around the edges of the last ${numPaddedDims} dimension${
+      numPaddedDims === 1 ? '' : 's'
+    }. Mode '${mode}' ${
+      mode === 'constant' ? `fills with the constant value ${value}` : `fills using ${mode} values from the existing tensor`
+    }. Dimensions not covered by the pad list are left unchanged.`,
+    formula: {
+      display: 'out = pad(input, pad, mode, value)',
+      substitution: `pad=[${pad.join(', ')}]: ${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+    },
+    shapeSteps: dimSteps.length
+      ? dimSteps
+      : [
+          {
+            label: 'Shape',
+            from: shapeText(inputShape),
+            to: shapeText(outputShape),
+          },
+        ],
+  }
+}
+
 export function explainNode(node: TraceNodeForExplanation): Explanation | null {
   if (node.label === 'Linear') return explainLinear(node)
   if (node.label === 'Flatten' || node.label === 'flatten') return explainFlatten(node)
@@ -421,5 +592,10 @@ export function explainNode(node: TraceNodeForExplanation): Explanation | null {
   if (node.label === 'view') return explainView(node)
   if (node.label === 'permute') return explainPermute(node)
   if (node.label === 'Embedding') return explainEmbedding(node)
+  if (node.label === 'LayerNorm') return explainLayerNorm(node)
+  if (node.label === 'GELU' || node.label === 'gelu') return explainGELU(node)
+  if (node.label === 'Dropout' || node.label === 'dropout') return explainDropout(node)
+  if (node.label === 'BatchNorm2d') return explainBatchNorm2d(node)
+  if (node.label === 'pad') return explainPad(node)
   return explainGeneric(node)
 }
