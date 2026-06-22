@@ -1,12 +1,7 @@
 import json
-import operator
-from typing import Any
-
 import torch
 import torch.nn as nn
-import torch.fx as fx
-from torch.fx.passes.shape_prop import ShapeProp
-from util import *
+from util.summary import model_summary
 
 
 
@@ -238,8 +233,11 @@ class MultiInputModel(nn.Module):
         output = self.classifier(combined)
         return output
 
-model = MultiInputModel()
-summary = model_summary(model, torch.randn(8, 3, 64, 64), torch.randn(8, 10))
+from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
+model = PianoTranscriber()
+
+# Give it random input in the shape (384, 252)
+summary = model_summary(model, torch.randn(1, 1, 100, 252))
 # Save output to frontend/public/branchy.json
-with open("frontend/public/branchy1.json", "w") as f:
+with open("frontend/public/branchy3.json", "w") as f:
     json.dump(summary, f)
