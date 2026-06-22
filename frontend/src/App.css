@@ -170,8 +170,8 @@ select:focus-visible {
 
 .graph-node {
   position: absolute;
-  width: 244px;
-  min-height: 178px;
+  min-width: 244px;
+  min-height: 136px;
   display: grid;
   grid-template-rows: auto auto auto auto 1fr;
   gap: 7px;
@@ -250,6 +250,9 @@ select:focus-visible {
 }
 
 .node-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--text-strong);
   font-size: 15px;
   line-height: 1.12;
@@ -260,10 +263,63 @@ select:focus-visible {
   min-width: 0;
   position: relative;
   color: var(--text-muted);
-  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.op-name {
+  margin-right: 6px;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-weight: 750;
+}
+
+.shape-flow,
+.shape-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shape-flow {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.shape-change {
+  flex-wrap: wrap;
+}
+
+.shape-arrow {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.shape-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 3px 5px;
+  border: 1px solid var(--shape-border);
+  border-radius: 999px;
+  color: var(--text-strong);
+  background: var(--shape-bg);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.shape-dim {
+  min-width: 16px;
+  padding: 3px 4px;
+  border-radius: 999px;
+  color: var(--shape-dim-text);
+  background: var(--shape-dim-bg);
+  text-align: center;
 }
 
 .shape-help {
@@ -272,7 +328,7 @@ select:focus-visible {
   place-items: center;
   width: 17px;
   height: 17px;
-  margin-left: 6px;
+  flex: 0 0 auto;
   border: 1px solid var(--accent);
   border-radius: 999px;
   color: var(--accent-hot);
@@ -284,7 +340,8 @@ select:focus-visible {
 
 .shape-tooltip {
   position: absolute;
-  left: 50%;
+  left: auto;
+  right: 0;
   bottom: calc(100% + 8px);
   z-index: 10;
   width: 220px;
@@ -299,7 +356,7 @@ select:focus-visible {
   line-height: 1.35;
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, 4px);
+  transform: translateY(4px);
   transition:
     opacity 140ms ease,
     transform 140ms ease;
@@ -308,7 +365,7 @@ select:focus-visible {
 .shape-help:hover .shape-tooltip,
 .shape-help:focus-visible .shape-tooltip {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
 }
 
 .node-kind {
@@ -333,12 +390,10 @@ select:focus-visible {
   line-height: 1.25;
 }
 
-.node-shapes span {
+.node-shapes > .shape-pill {
   min-width: 0;
-  padding: 5px 6px;
-  border-radius: 6px;
-  background: var(--chip);
-  overflow-wrap: anywhere;
+  justify-content: flex-start;
+  overflow: hidden;
 }
 
 .node-param {
@@ -497,13 +552,19 @@ h3 span {
   padding: 0 12px 12px;
 }
 
-.formula-block p,
 .detail-block,
 .input-spec {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card-glass);
   backdrop-filter: blur(14px);
+}
+
+.formula-block {
+  padding: 12px;
+  border: 1px solid var(--formula-border);
+  border-radius: 8px;
+  background: var(--formula-bg);
 }
 
 .formula-block p {
@@ -540,6 +601,21 @@ h3 span {
   font-size: 12px;
 }
 
+.info-row .shape-pill,
+.input-spec .shape-pill,
+.collapse-body .shape-pill {
+  color: var(--text-strong);
+  background: var(--shape-bg-strong);
+  border-color: var(--shape-border-strong);
+}
+
+.info-row .shape-dim,
+.input-spec .shape-dim,
+.collapse-body .shape-dim {
+  color: var(--shape-dim-text-strong);
+  background: var(--shape-dim-bg-strong);
+}
+
 .info-row strong {
   min-width: 0;
   color: var(--text-strong);
@@ -551,7 +627,15 @@ h3 span {
 
 .detail-block--interactive {
   border-color: var(--interactive-border);
-  box-shadow: inset 0 0 0 1px var(--interactive-soft);
+  box-shadow: inset 0 0 0 1px var(--interactive-soft), 0 0 18px rgba(117, 215, 255, 0.06);
+  cursor: pointer;
+}
+
+.detail-block--interactive:hover,
+.detail-block--interactive:focus-visible {
+  outline: none;
+  border-color: var(--accent-hot);
+  background: var(--interactive-hover);
 }
 
 .focus-list {
@@ -596,14 +680,58 @@ h3 span {
   background: var(--card);
 }
 
+.shape-step--preserved {
+  border-color: var(--shape-preserved);
+}
+
+.shape-step--changed {
+  border-color: var(--shape-changed);
+  box-shadow: inset 3px 0 0 var(--shape-changed);
+}
+
+.shape-step--created {
+  border-color: var(--shape-created);
+  box-shadow: inset 3px 0 0 var(--shape-created);
+}
+
+.shape-step--reduced {
+  border-color: var(--shape-reduced);
+  box-shadow: inset 3px 0 0 var(--shape-reduced);
+}
+
+.shape-step--changed h3,
+.shape-step--changed .shape-arrow {
+  color: var(--shape-changed);
+}
+
+.shape-step--created h3,
+.shape-step--created .shape-arrow {
+  color: var(--shape-created);
+}
+
+.shape-step--reduced h3,
+.shape-step--reduced .shape-arrow {
+  color: var(--shape-reduced);
+}
+
+.formula-code,
 code {
   padding: 6px 8px;
   border-radius: 6px;
   color: var(--text-strong);
-  background: var(--chip);
+  background: var(--formula-code-bg);
   font-family: var(--mono);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.formula-code {
+  display: block;
+  border: 1px solid var(--formula-border);
+}
+
+.formula-code--substitution {
+  color: var(--accent-hot);
 }
 
 .empty-note {

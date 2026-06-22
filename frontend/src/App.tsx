@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, PointerEvent, ReactNode, WheelEvent } from 'react'
+import type { ChangeEvent, PointerEvent, ReactNode } from 'react'
 import './App.css'
 import { explainNode } from './explanations'
 
@@ -102,7 +102,7 @@ type LayoutPositions = Record<string, NodePosition>
 type LayoutDirection = 'left-right' | 'top-bottom'
 
 const nodeWidth = 244
-const nodeHeight = 178
+const nodeHeight = 136
 const columnGap = 128
 const rowGap = 72
 const padding = 64
@@ -116,6 +116,10 @@ function clamp(value: number, min: number, max: number) {
 
 function formatShape(shape?: number[]) {
   return shape ? `[${shape.join(', ')}]` : 'scalar'
+}
+
+function shapeParts(shape?: number[]) {
+  return shape?.map((dim) => String(dim)) ?? ['scalar']
 }
 
 function formatDtype(dtype?: string) {
@@ -134,15 +138,13 @@ function primaryOutput(node: TraceNode) {
   return tensorValues(node.outputs)[0]
 }
 
-function nodeLabel(node: TraceNode) {
-  const input = primaryInput(node)
-  const output = primaryOutput(node)
+function nodeCardWidth(node: TraceNode) {
+  const inputDims = primaryInput(node)?.shape?.length ?? 1
+  const outputDims = primaryOutput(node)?.shape?.length ?? 1
+  const shapeFlowWidth = 72 + (inputDims + outputDims) * 24
+  const titleWidth = 76 + node.label.length * 8
 
-  if (!input && output) {
-    return `${node.label} ${formatShape(output.shape)}`
-  }
-
-  return `${node.label} ${formatShape(input?.shape)} -> ${formatShape(output?.shape)}`
+  return Math.max(nodeWidth, shapeFlowWidth, titleWidth)
 }
 
 function formatNumber(value?: number, digits = 3, suffix = '') {
@@ -161,6 +163,10 @@ function formatUnknown(value: unknown) {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (value === null || value === undefined) return 'n/a'
   return JSON.stringify(value)
+}
+
+function isShapeString(value: string) {
+  return value === 'scalar' || /^\[[\d\s,\-]+\]$/.test(value)
 }
 
 function parseTraceJson(text: string) {
@@ -311,6 +317,51 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
+function ShapePill({ shape }: { shape?: number[] }) {
+  return (
+    <span className="shape-pill" aria-label={formatShape(shape)}>
+      {shapeParts(shape).map((part, index) => (
+        <span className="shape-dim" key={`${part}-${index}`}>
+          {part}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function ShapeFlow({ input, output }: { input?: number[]; output?: number[] }) {
+  return (
+    <span className="shape-flow">
+      <ShapePill shape={input} />
+      <span className="shape-arrow">-&gt;</span>
+      <ShapePill shape={output} />
+    </span>
+  )
+}
+
+function ValueDisplay({ value }: { value: unknown }) {
+  if (Array.isArray(value) && value.every((item) => typeof item === 'number')) {
+    return <ShapePill shape={value} />
+  }
+
+  if (typeof value === 'string' && isShapeString(value)) {
+    if (value === 'scalar') return <ShapePill />
+    return <ShapePill shape={value.slice(1, -1).split(',').map((part) => Number(part.trim()))} />
+  }
+
+  return <>{String(value ?? 'n/a')}</>
+}
+
+function classifyShapeStep(from: unknown, to: unknown) {
+  const fromText = formatUnknown(from)
+  const toText = formatUnknown(to)
+
+  if (fromText === toText) return 'preserved'
+  if (fromText === '-' || fromText === 'n/a' || fromText === 'undefined') return 'created'
+  if (toText === '-' || toText === 'n/a' || toText === 'undefined') return 'reduced'
+  return 'changed'
+}
+
 function CollapsibleSection({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
   return (
     <details className="collapse-section" open={defaultOpen}>
@@ -324,7 +375,14 @@ function CollapsibleSection({ title, children, defaultOpen = true }: { title: st
 
 function FocusButton({ nodeId, onFocusNode }: { nodeId: string; onFocusNode: (nodeId: string) => void }) {
   return (
-    <button type="button" className="focus-chip" onClick={() => onFocusNode(nodeId)}>
+    <button
+      type="button"
+      className="focus-chip"
+      onClick={(event) => {
+        event.stopPropagation()
+        onFocusNode(nodeId)
+      }}
+    >
       {nodeId}
     </button>
   )
@@ -343,8 +401,24 @@ function TensorDetail({
   outputTargets?: string[]
   onFocusNode: (nodeId: string) => void
 }) {
+  const isInteractive = Boolean(focusNodeId || outputTargets.length)
+
+  function onTensorClick() {
+    if (focusNodeId) {
+      onFocusNode(focusNodeId)
+    }
+  }
+
   return (
-    <section className={`detail-block ${focusNodeId || outputTargets.length ? 'detail-block--interactive' : ''}`}>
+    <section
+      className={`detail-block ${isInteractive ? 'detail-block--interactive' : ''}`}
+      role={focusNodeId ? 'button' : undefined}
+      tabIndex={focusNodeId ? 0 : undefined}
+      onClick={onTensorClick}
+      onKeyDown={(event) => {
+        if (focusNodeId && (event.key === 'Enter' || event.key === ' ')) onTensorClick()
+      }}
+    >
       <h3>
         {title}
         {value.from_node ? <span>from {value.from_node}</span> : null}
@@ -356,7 +430,7 @@ function TensorDetail({
           <strong className="focus-list">{outputTargets.map((target) => <FocusButton key={target} nodeId={target} onFocusNode={onFocusNode} />)}</strong>
         </div>
       ) : null}
-      <InfoRow label="shape" value={formatShape(value.shape)} />
+      <InfoRow label="shape" value={<ShapePill shape={value.shape} />} />
       <InfoRow label="dtype" value={formatDtype(value.dtype)} />
       <InfoRow label="preview" value={formatPreview(value.preview)} />
       {value.summary ? (
@@ -376,7 +450,7 @@ function ParamsDetail({ params }: { params?: ParamsInfo }) {
 
   return (
     <section className="detail-block">
-      {shapes.length ? shapes.map(([name, shape]) => <InfoRow key={name} label={name} value={formatShape(shape)} />) : <p className="empty-note">No parameter tensors</p>}
+      {shapes.length ? shapes.map(([name, shape]) => <InfoRow key={name} label={name} value={<ShapePill shape={shape} />} />) : <p className="empty-note">No parameter tensors</p>}
       <InfoRow label="count" value={(params?.count ?? 0).toLocaleString()} />
       <InfoRow label="memory" value={params?.memory?.human ?? '0 B'} />
     </section>
@@ -396,20 +470,30 @@ function TransformationDetail({ node }: { node: TraceNode }) {
     <section className="transformation-detail">
       <p className="transformation-short">{explanation.short}</p>
       <p>{explanation.description}</p>
-      <InfoRow label="input shape" value={inputShape} />
-      <InfoRow label="output shape" value={outputShape} />
+      <InfoRow label="input shape" value={<ValueDisplay value={inputShape} />} />
+      <InfoRow label="output shape" value={<ValueDisplay value={outputShape} />} />
       {explanation.shapeSteps.map((step) => (
-        <section className="shape-step" key={step.label}>
+        <section className={`shape-step shape-step--${classifyShapeStep(step.from, step.to)}`} key={step.label}>
           <h3>{step.label}</h3>
-          {step.from !== undefined || step.to !== undefined ? <InfoRow label="change" value={`${step.from ?? 'n/a'} -> ${step.to ?? 'n/a'}`} /> : null}
+          {step.from !== undefined || step.to !== undefined ? (
+            <div className="info-row">
+              <span>change</span>
+              <strong className="shape-change">
+                <ValueDisplay value={step.from ?? 'n/a'} />
+                <span className="shape-arrow">-&gt;</span>
+                <ValueDisplay value={step.to ?? 'n/a'} />
+              </strong>
+            </div>
+          ) : null}
           {step.reason ? <p>{step.reason}</p> : null}
-          {step.substitution ? <code>{step.substitution}</code> : null}
+          {step.substitution ? <code className="formula-code">{step.substitution}</code> : null}
         </section>
       ))}
       {explanation.formula ? (
         <section className="formula-block">
-          <p>{explanation.formula.display}</p>
-          {explanation.formula.substitution ? <code>{explanation.formula.substitution}</code> : null}
+          <h3>Formula</h3>
+          <code className="formula-code">{explanation.formula.display}</code>
+          {explanation.formula.substitution ? <code className="formula-code formula-code--substitution">{explanation.formula.substitution}</code> : null}
         </section>
       ) : null}
     </section>
@@ -455,7 +539,7 @@ function ModelSummary({ trace, outputNodes }: { trace: TracePayload; outputNodes
           stats.input_specs.map((input) => (
             <div className="input-spec" key={`${input.index}-${input.name}`}>
               <strong>{input.name ?? `input ${input.index}`}</strong>
-              <span>{formatShape(input.shape)}</span>
+              <span><ShapePill shape={input.shape} /></span>
               <span>{formatDtype(input.dtype)}</span>
               <span>{input.memory?.human ?? 'n/a'}</span>
             </div>
@@ -470,7 +554,7 @@ function ModelSummary({ trace, outputNodes }: { trace: TracePayload; outputNodes
             <div className="input-spec" key={node.id}>
               <strong>{node.label}</strong>
               <span>{node.id}</span>
-              <span>{formatShape(primaryOutput(node)?.shape)}</span>
+              <span><ShapePill shape={primaryOutput(node)?.shape} /></span>
               <span>{formatDtype(primaryOutput(node)?.dtype)}</span>
             </div>
           ))
@@ -533,7 +617,7 @@ function NodeInspector({
       <CollapsibleSection title="Output">
         <section className="stack-block">
         {tensorOutputs.length ? tensorOutputs.map((output) => {
-          const targets = outgoingEdges.filter((edge) => edge.source_output === output.index).map((edge) => edge.target)
+          const targets = Array.from(new Set(outgoingEdges.filter((edge) => edge.source_output === output.index).map((edge) => edge.target)))
           return <TensorDetail key={output.index} title={`${output.index}`} value={output} outputTargets={targets} onFocusNode={onFocusNode} />
         }) : <p className="empty-note">No tensor outputs</p>}
         </section>
@@ -548,9 +632,10 @@ function NodeInspector({
 
 function App() {
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const inspectorRef = useRef<HTMLElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragRef = useRef({ active: false, x: 0, y: 0, moved: false })
-  const nodeDragRef = useRef({ active: false, nodeId: '', x: 0, y: 0, moved: false })
+  const nodeDragRef = useRef({ active: false, nodeId: '', x: 0, y: 0, startNodeX: 0, startNodeY: 0, moved: false })
   const [trace, setTrace] = useState<TracePayload | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
@@ -605,7 +690,7 @@ function App() {
     const ys = layoutNodes.map((node) => node.y)
     const minX = Math.min(0, ...xs)
     const minY = Math.min(0, ...ys)
-    const maxX = Math.max(layout?.width ?? 0, ...layoutNodes.map((node) => node.x + nodeWidth))
+    const maxX = Math.max(layout?.width ?? 0, ...layoutNodes.map((node) => node.x + nodeCardWidth(node)))
     const maxY = Math.max(layout?.height ?? 0, ...layoutNodes.map((node) => node.y + nodeHeight))
 
     return {
@@ -623,6 +708,30 @@ function App() {
       x: (bounds.width - layout.width * scale) / 2,
       y: (bounds.height - layout.height * scale) / 2,
     })
+  }
+
+  function centerNode(nodeId: string) {
+    const node = nodesById.get(nodeId)
+    const viewport = viewportRef.current
+    if (!node || !viewport) return
+
+    const bounds = viewport.getBoundingClientRect()
+    const nextScale = clamp(Math.max(view.scale, 1.12), minScale, maxScale)
+    setView({
+      scale: nextScale,
+      x: bounds.width / 2 - (node.x + nodeCardWidth(node) / 2) * nextScale,
+      y: bounds.height / 2 - (node.y + nodeHeight / 2) * nextScale,
+    })
+  }
+
+  function focusNode(nodeId: string, options: { centerCamera?: boolean } = {}) {
+    if (!nodesById.has(nodeId)) return
+    setSelectedNodeId(nodeId)
+    setIsInspectorOpen(true)
+    if (options.centerCamera) {
+      centerNode(nodeId)
+    }
+    inspectorRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function resetView() {
@@ -664,7 +773,16 @@ function App() {
 
   function onNodePointerDown(event: PointerEvent<HTMLButtonElement>, nodeId: string) {
     event.stopPropagation()
-    nodeDragRef.current = { active: true, nodeId, x: event.clientX, y: event.clientY, moved: false }
+    const node = nodesById.get(nodeId)
+    nodeDragRef.current = {
+      active: true,
+      nodeId,
+      x: event.clientX,
+      y: event.clientY,
+      startNodeX: node?.x ?? 0,
+      startNodeY: node?.y ?? 0,
+      moved: false,
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
@@ -673,17 +791,14 @@ function App() {
     const dx = (event.clientX - nodeDragRef.current.x) / view.scale
     const dy = (event.clientY - nodeDragRef.current.y) / view.scale
     if (Math.abs(dx) + Math.abs(dy) > 1) nodeDragRef.current.moved = true
-    nodeDragRef.current.x = event.clientX
-    nodeDragRef.current.y = event.clientY
-
     const node = nodesById.get(nodeDragRef.current.nodeId)
     if (!node) return
 
     setLayoutPositions((current) => ({
       ...current,
       [node.id]: {
-        x: node.x + dx,
-        y: node.y + dy,
+        x: nodeDragRef.current.startNodeX + dx,
+        y: nodeDragRef.current.startNodeY + dy,
       },
     }))
   }
@@ -692,31 +807,33 @@ function App() {
     nodeDragRef.current.active = false
   }
 
-  function onWheel(event: WheelEvent<HTMLDivElement>) {
-    event.preventDefault()
-    const rect = event.currentTarget.getBoundingClientRect()
-    const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1
-    const nextScale = clamp(view.scale * zoomFactor, minScale, maxScale)
-    const graphX = (event.clientX - rect.left - view.x) / view.scale
-    const graphY = (event.clientY - rect.top - view.y) / view.scale
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return undefined
+    const currentViewport = viewport
 
-    setView({
-      scale: nextScale,
-      x: event.clientX - rect.left - graphX * nextScale,
-      y: event.clientY - rect.top - graphY * nextScale,
-    })
-  }
+    function onWheel(event: WheelEvent) {
+      event.preventDefault()
+      const rect = currentViewport.getBoundingClientRect()
+      const zoomFactor = Math.exp(-event.deltaY * 0.0035)
+      const nextScale = clamp(view.scale * zoomFactor, minScale, maxScale)
+      const graphX = (event.clientX - rect.left - view.x) / view.scale
+      const graphY = (event.clientY - rect.top - view.y) / view.scale
+
+      setView({
+        scale: nextScale,
+        x: event.clientX - rect.left - graphX * nextScale,
+        y: event.clientY - rect.top - graphY * nextScale,
+      })
+    }
+
+    currentViewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => currentViewport.removeEventListener('wheel', onWheel)
+  }, [view.scale, view.x, view.y])
 
   function selectNode(nodeId: string) {
     if (nodeDragRef.current.moved) return
-    setSelectedNodeId(nodeId)
-    setIsInspectorOpen(true)
-  }
-
-  function focusNode(nodeId: string) {
-    if (!nodesById.has(nodeId)) return
-    setSelectedNodeId(nodeId)
-    setIsInspectorOpen(true)
+    focusNode(nodeId)
   }
 
   function applyTracePayload(payload: TracePayload) {
@@ -800,7 +917,6 @@ function App() {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onWheel={onWheel}
         >
           <div className="graph-transform" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
             <div className="graph-stage" style={{ width: stageBounds.width, height: stageBounds.height }}>
@@ -809,14 +925,19 @@ function App() {
                   const source = nodesById.get(edge.source)
                   const target = nodesById.get(edge.target)
                   if (!source || !target) return null
-                  const startX = source.x + nodeWidth
-                  const startY = source.y + nodeHeight / 2
-                  const endX = target.x
-                  const endY = target.y + nodeHeight / 2
-                  const curve = Math.max(60, (endX - startX) / 2)
+                  const sourceWidth = nodeCardWidth(source)
+                  const targetWidth = nodeCardWidth(target)
+                  const startX = layoutDirection === 'left-right' ? source.x + sourceWidth : source.x + sourceWidth / 2
+                  const startY = layoutDirection === 'left-right' ? source.y + nodeHeight / 2 : source.y + nodeHeight
+                  const endX = layoutDirection === 'left-right' ? target.x : target.x + targetWidth / 2
+                  const endY = layoutDirection === 'left-right' ? target.y + nodeHeight / 2 : target.y
+                  const curve = Math.max(60, layoutDirection === 'left-right' ? (endX - startX) / 2 : (endY - startY) / 2)
                   const isSelected = selectedNodeId === edge.source
 
-                  const path = `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`
+                  const path =
+                    layoutDirection === 'left-right'
+                      ? `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`
+                      : `M ${startX} ${startY} C ${startX} ${startY + curve}, ${endX} ${endY - curve}, ${endX} ${endY}`
 
                   return (
                     <g key={edge.id}>
@@ -842,7 +963,7 @@ function App() {
                     key={node.id}
                     type="button"
                     className={`graph-node ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
-                    style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
+                    style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: nodeCardWidth(node) }}
                     onPointerDown={(event) => onNodePointerDown(event, node.id)}
                     onPointerMove={onNodePointerMove}
                     onPointerUp={onNodePointerUp}
@@ -852,9 +973,8 @@ function App() {
                     <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span>
                     {node.module?.is_reused ? <span className="node-badge node-badge--shared">S</span> : null}
                     {isOutputNode ? <span className="node-badge node-badge--output">O</span> : null}
-                    <span className="node-title">{node.label}</span>
-                    <span className="node-label">
-                      {nodeLabel(node)}
+                    <span className="node-title">
+                      {node.label}
                       {explanation ? (
                         <span className="shape-help" aria-label={explanation.short}>
                           ?
@@ -862,11 +982,10 @@ function App() {
                         </span>
                       ) : null}
                     </span>
-                    <span className="node-kind">{node.kind}</span>
-                    <span className="node-shapes">
-                      <span>{formatShape(input?.shape)}</span>
-                      <span>{formatShape(output?.shape)}</span>
+                    <span className="node-label">
+                      <ShapeFlow input={input?.shape} output={output?.shape} />
                     </span>
+                    <span className="node-kind">{node.kind}</span>
                     <span className="node-param">{totalParamLabel(node)} / {primaryOutput(node)?.memory?.human ?? '0 B'} act</span>
                   </button>
                 )
@@ -876,9 +995,13 @@ function App() {
         </div>
       </section>
 
-      <aside className="inspector" aria-label="Node inspector">
+      <aside ref={inspectorRef} className="inspector" aria-label="Node inspector">
         {inspectorNode ? (
-          <NodeInspector node={inspectorNode} outgoingEdges={outgoingEdgesByNode.get(inspectorNode.id) ?? []} onFocusNode={focusNode} />
+          <NodeInspector
+            node={inspectorNode}
+            outgoingEdges={outgoingEdgesByNode.get(inspectorNode.id) ?? []}
+            onFocusNode={(nodeId) => focusNode(nodeId, { centerCamera: true })}
+          />
         ) : (
           <ModelSummary trace={trace} outputNodes={outputNodes} />
         )}
