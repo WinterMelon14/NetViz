@@ -39,6 +39,9 @@
   --badge-module: #75d7ff;
   --badge-function: #c4b5fd;
   --badge-method: #f0abfc;
+  --badge-output: #facc15;
+  --interactive-border: rgba(117, 215, 255, 0.45);
+  --interactive-soft: rgba(117, 215, 255, 0.11);
   --grid-line: rgba(66, 108, 152, 0.12);
   --grid-dot: rgba(66, 108, 152, 0.24);
   --edge: #315d8c;
@@ -81,6 +84,9 @@
   --badge-module: #0369a1;
   --badge-function: #6d28d9;
   --badge-method: #a21caf;
+  --badge-output: #b45309;
+  --interactive-border: rgba(0, 120, 208, 0.34);
+  --interactive-soft: rgba(0, 120, 208, 0.1);
   --grid-line: rgba(64, 111, 158, 0.14);
   --grid-dot: rgba(64, 111, 158, 0.24);
   --edge: #7195ba;

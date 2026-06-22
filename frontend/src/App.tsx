@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, PointerEvent, ReactNode, WheelEvent } from 'react'
 import './App.css'
+import { explainNode } from './explanations'
 
 type TensorSummary = {
   numel?: number
@@ -98,9 +99,10 @@ type NodePosition = {
 }
 
 type LayoutPositions = Record<string, NodePosition>
+type LayoutDirection = 'left-right' | 'top-bottom'
 
 const nodeWidth = 244
-const nodeHeight = 148
+const nodeHeight = 178
 const columnGap = 128
 const rowGap = 72
 const padding = 64
@@ -153,6 +155,12 @@ function formatPreview(values?: number[]) {
   if (!values?.length) return 'n/a'
   const preview = values.slice(0, 4).map((value) => formatNumber(value, 4))
   return `[${preview.join(', ')}${values.length > 4 ? ', ...' : ''}]`
+}
+
+function formatUnknown(value: unknown) {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (value === null || value === undefined) return 'n/a'
+  return JSON.stringify(value)
 }
 
 function parseTraceJson(text: string) {
@@ -221,14 +229,15 @@ function kindBadge(node: TraceNode) {
   return labelByKind[node.kind] ?? node.kind.slice(0, 1).toUpperCase()
 }
 
-function maxColumnHeight(columns: Map<number, TraceNode[]>) {
+function maxColumnSpan(columns: Map<number, TraceNode[]>, direction: LayoutDirection) {
+  const primarySize = direction === 'left-right' ? nodeHeight : nodeWidth
   return Math.max(
-    nodeHeight,
-    ...Array.from(columns.values()).map((column) => column.length * nodeHeight + (column.length - 1) * rowGap),
+    primarySize,
+    ...Array.from(columns.values()).map((column) => column.length * primarySize + (column.length - 1) * rowGap),
   )
 }
 
-function buildLayout(nodes: TraceNode[], edges: TraceEdge[]) {
+function buildLayout(nodes: TraceNode[], edges: TraceEdge[], direction: LayoutDirection) {
   const nodeIds = new Set(nodes.map((node) => node.id))
   const inbound = new Map(nodes.map((node) => [node.id, 0]))
   const outgoing = new Map<string, string[]>()
@@ -259,33 +268,45 @@ function buildLayout(nodes: TraceNode[], edges: TraceEdge[]) {
     columns.set(column, [...(columns.get(column) ?? []), node])
   })
 
-  const tallestColumn = maxColumnHeight(columns)
+  const widestLevel = maxColumnSpan(columns, direction)
   const layoutNodes = nodes.map((node) => {
     const column = depth.get(node.id) ?? 0
     const columnNodes = columns.get(column) ?? []
     const row = columnNodes.findIndex((candidate) => candidate.id === node.id)
-    const columnHeight = columnNodes.length * nodeHeight + (columnNodes.length - 1) * rowGap
+    const levelSpan = columnNodes.length * (direction === 'left-right' ? nodeHeight : nodeWidth) + (columnNodes.length - 1) * rowGap
 
     return {
       ...node,
       depth: column,
-      x: padding + column * (nodeWidth + columnGap),
-      y: padding + Math.max(0, (tallestColumn - columnHeight) / 2) + row * (nodeHeight + rowGap),
+      x:
+        direction === 'left-right'
+          ? padding + column * (nodeWidth + columnGap)
+          : padding + Math.max(0, (widestLevel - levelSpan) / 2) + row * (nodeWidth + rowGap),
+      y:
+        direction === 'left-right'
+          ? padding + Math.max(0, (widestLevel - levelSpan) / 2) + row * (nodeHeight + rowGap)
+          : padding + column * (nodeHeight + columnGap),
     }
   })
 
   return {
     nodes: layoutNodes,
-    width: padding * 2 + (Math.max(...Array.from(columns.keys()), 0) + 1) * nodeWidth + Math.max(0, columns.size - 1) * columnGap,
-    height: padding * 2 + tallestColumn,
+    width:
+      direction === 'left-right'
+        ? padding * 2 + (Math.max(...Array.from(columns.keys()), 0) + 1) * nodeWidth + Math.max(0, columns.size - 1) * columnGap
+        : padding * 2 + Math.max(nodeWidth, widestLevel),
+    height:
+      direction === 'left-right'
+        ? padding * 2 + widestLevel
+        : padding * 2 + (Math.max(...Array.from(columns.keys()), 0) + 1) * nodeHeight + Math.max(0, columns.size - 1) * columnGap,
   }
 }
 
-function InfoRow({ label, value }: { label: string; value: unknown }) {
+function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="info-row">
       <span>{label}</span>
-      <strong>{String(value ?? 'n/a')}</strong>
+      <strong>{value ?? 'n/a'}</strong>
     </div>
   )
 }
@@ -301,13 +322,40 @@ function CollapsibleSection({ title, children, defaultOpen = true }: { title: st
   )
 }
 
-function TensorDetail({ title, value }: { title: string; value: TensorValue }) {
+function FocusButton({ nodeId, onFocusNode }: { nodeId: string; onFocusNode: (nodeId: string) => void }) {
   return (
-    <section className="detail-block">
+    <button type="button" className="focus-chip" onClick={() => onFocusNode(nodeId)}>
+      {nodeId}
+    </button>
+  )
+}
+
+function TensorDetail({
+  title,
+  value,
+  focusNodeId,
+  outputTargets = [],
+  onFocusNode,
+}: {
+  title: string
+  value: TensorValue
+  focusNodeId?: string
+  outputTargets?: string[]
+  onFocusNode: (nodeId: string) => void
+}) {
+  return (
+    <section className={`detail-block ${focusNodeId || outputTargets.length ? 'detail-block--interactive' : ''}`}>
       <h3>
         {title}
         {value.from_node ? <span>from {value.from_node}</span> : null}
       </h3>
+      {focusNodeId ? <InfoRow label="focus" value={<FocusButton nodeId={focusNodeId} onFocusNode={onFocusNode} />} /> : null}
+      {outputTargets.length ? (
+        <div className="info-row">
+          <span>to</span>
+          <strong className="focus-list">{outputTargets.map((target) => <FocusButton key={target} nodeId={target} onFocusNode={onFocusNode} />)}</strong>
+        </div>
+      ) : null}
       <InfoRow label="shape" value={formatShape(value.shape)} />
       <InfoRow label="dtype" value={formatDtype(value.dtype)} />
       <InfoRow label="preview" value={formatPreview(value.preview)} />
@@ -335,7 +383,40 @@ function ParamsDetail({ params }: { params?: ParamsInfo }) {
   )
 }
 
-function ModelSummary({ trace }: { trace: TracePayload }) {
+function TransformationDetail({ node }: { node: TraceNode }) {
+  const explanation = explainNode(node)
+  const inputShape = formatShape(primaryInput(node)?.shape)
+  const outputShape = formatShape(primaryOutput(node)?.shape)
+
+  if (!explanation) {
+    return <p className="empty-note">No transformation metadata available.</p>
+  }
+
+  return (
+    <section className="transformation-detail">
+      <p className="transformation-short">{explanation.short}</p>
+      <p>{explanation.description}</p>
+      <InfoRow label="input shape" value={inputShape} />
+      <InfoRow label="output shape" value={outputShape} />
+      {explanation.shapeSteps.map((step) => (
+        <section className="shape-step" key={step.label}>
+          <h3>{step.label}</h3>
+          {step.from !== undefined || step.to !== undefined ? <InfoRow label="change" value={`${step.from ?? 'n/a'} -> ${step.to ?? 'n/a'}`} /> : null}
+          {step.reason ? <p>{step.reason}</p> : null}
+          {step.substitution ? <code>{step.substitution}</code> : null}
+        </section>
+      ))}
+      {explanation.formula ? (
+        <section className="formula-block">
+          <p>{explanation.formula.display}</p>
+          {explanation.formula.substitution ? <code>{explanation.formula.substitution}</code> : null}
+        </section>
+      ) : null}
+    </section>
+  )
+}
+
+function ModelSummary({ trace, outputNodes }: { trace: TracePayload; outputNodes: TraceNode[] }) {
   const stats = trace.stats
 
   return (
@@ -383,11 +464,33 @@ function ModelSummary({ trace }: { trace: TracePayload }) {
           <p className="empty-note">No input specs found in stats.</p>
         )}
       </CollapsibleSection>
+      <CollapsibleSection title="Outputs">
+        {outputNodes.length ? (
+          outputNodes.map((node) => (
+            <div className="input-spec" key={node.id}>
+              <strong>{node.label}</strong>
+              <span>{node.id}</span>
+              <span>{formatShape(primaryOutput(node)?.shape)}</span>
+              <span>{formatDtype(primaryOutput(node)?.dtype)}</span>
+            </div>
+          ))
+        ) : (
+          <p className="empty-note">No terminal output nodes found.</p>
+        )}
+      </CollapsibleSection>
     </>
   )
 }
 
-function NodeInspector({ node }: { node: TraceNode }) {
+function NodeInspector({
+  node,
+  outgoingEdges,
+  onFocusNode,
+}: {
+  node: TraceNode
+  outgoingEdges: TraceEdge[]
+  onFocusNode: (nodeId: string) => void
+}) {
   const tensorInputs = tensorValues(node.inputs)
   const tensorOutputs = tensorValues(node.outputs)
   const attrEntries = Object.entries(node.attrs ?? {})
@@ -412,26 +515,27 @@ function NodeInspector({ node }: { node: TraceNode }) {
       {attrEntries.length ? (
         <CollapsibleSection title="Attributes">
           {attrEntries.map(([key, value]) => (
-            <InfoRow key={key} label={key} value={value} />
+            <InfoRow key={key} label={key} value={formatUnknown(value)} />
           ))}
         </CollapsibleSection>
       ) : null}
 
-      <CollapsibleSection title="Formula">
-        <section className="formula-block">
-          <p>{node.formula ?? node.fx_op}</p>
-        </section>
+      <CollapsibleSection title="Transformation">
+        <TransformationDetail node={node} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Inputs">
         <section className="stack-block">
-        {tensorInputs.length ? tensorInputs.map((input) => <TensorDetail key={input.index} title={`${input.index}`} value={input} />) : <p className="empty-note">No tensor inputs</p>}
+        {tensorInputs.length ? tensorInputs.map((input) => <TensorDetail key={input.index} title={`${input.index}`} value={input} focusNodeId={input.from_node} onFocusNode={onFocusNode} />) : <p className="empty-note">No tensor inputs</p>}
         </section>
       </CollapsibleSection>
 
       <CollapsibleSection title="Output">
         <section className="stack-block">
-        {tensorOutputs.length ? tensorOutputs.map((output) => <TensorDetail key={output.index} title={`${output.index}`} value={output} />) : <p className="empty-note">No tensor outputs</p>}
+        {tensorOutputs.length ? tensorOutputs.map((output) => {
+          const targets = outgoingEdges.filter((edge) => edge.source_output === output.index).map((edge) => edge.target)
+          return <TensorDetail key={output.index} title={`${output.index}`} value={output} outputTargets={targets} onFocusNode={onFocusNode} />
+        }) : <p className="empty-note">No tensor outputs</p>}
         </section>
       </CollapsibleSection>
 
@@ -451,6 +555,7 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>('left-right')
   const [view, setView] = useState({ x: 36, y: 36, scale: 1 })
   const [error, setError] = useState<string | null>(null)
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
@@ -472,7 +577,7 @@ function App() {
       .catch((loadError: Error) => setError(loadError.message))
   }, [])
 
-  const layout = useMemo(() => (trace ? buildLayout(trace.graph.nodes, trace.graph.edges) : null), [trace])
+  const layout = useMemo(() => (trace ? buildLayout(trace.graph.nodes, trace.graph.edges, layoutDirection) : null), [layoutDirection, trace])
   const layoutNodes = useMemo(() => {
     return (
       layout?.nodes.map((node) => ({
@@ -483,6 +588,16 @@ function App() {
     )
   }, [layout, layoutPositions])
   const nodesById = useMemo(() => new Map(layoutNodes.map((node) => [node.id, node])), [layoutNodes])
+  const outgoingEdgesByNode = useMemo(() => {
+    const map = new Map<string, TraceEdge[]>()
+    trace?.graph.edges.forEach((edge) => {
+      map.set(edge.source, [...(map.get(edge.source) ?? []), edge])
+    })
+    return map
+  }, [trace])
+  const outputNodes = useMemo(() => {
+    return layoutNodes.filter((node) => node.inputs.length > 0 && !(outgoingEdgesByNode.get(node.id)?.length))
+  }, [layoutNodes, outgoingEdgesByNode])
   const selectedNode = selectedNodeId ? nodesById.get(selectedNodeId) : undefined
   const inspectorNode = selectedNode
   const stageBounds = useMemo(() => {
@@ -541,6 +656,9 @@ function App() {
   }
 
   function onPointerUp() {
+    if (dragRef.current.active && !dragRef.current.moved) {
+      setSelectedNodeId(null)
+    }
     dragRef.current.active = false
   }
 
@@ -591,6 +709,12 @@ function App() {
 
   function selectNode(nodeId: string) {
     if (nodeDragRef.current.moved) return
+    setSelectedNodeId(nodeId)
+    setIsInspectorOpen(true)
+  }
+
+  function focusNode(nodeId: string) {
+    if (!nodesById.has(nodeId)) return
     setSelectedNodeId(nodeId)
     setIsInspectorOpen(true)
   }
@@ -651,6 +775,19 @@ function App() {
           <button type="button" onClick={resetView}>Reset</button>
           <button type="button" onClick={resetLayout}>Reset Layout</button>
           <button type="button" onClick={fitView}>Fit Graph</button>
+          <label className="toolbar-field">
+            Layout
+            <select
+              value={layoutDirection}
+              onChange={(event) => {
+                setLayoutDirection(event.target.value as LayoutDirection)
+                setLayoutPositions({})
+              }}
+            >
+              <option value="left-right">Left to right</option>
+              <option value="top-bottom">Top to bottom</option>
+            </select>
+          </label>
           <button type="button" onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
         </div>
       </header>
@@ -697,6 +834,8 @@ function App() {
                 const input = primaryInput(node)
                 const output = primaryOutput(node)
                 const isSelected = node.id === selectedNodeId
+                const isOutputNode = outputNodes.some((outputNode) => outputNode.id === node.id)
+                const explanation = explainNode(node)
 
                 return (
                   <button
@@ -712,8 +851,17 @@ function App() {
                   >
                     <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span>
                     {node.module?.is_reused ? <span className="node-badge node-badge--shared">S</span> : null}
+                    {isOutputNode ? <span className="node-badge node-badge--output">O</span> : null}
                     <span className="node-title">{node.label}</span>
-                    <span className="node-label">{nodeLabel(node)}</span>
+                    <span className="node-label">
+                      {nodeLabel(node)}
+                      {explanation ? (
+                        <span className="shape-help" aria-label={explanation.short}>
+                          ?
+                          <span className="shape-tooltip">{explanation.short}</span>
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="node-kind">{node.kind}</span>
                     <span className="node-shapes">
                       <span>{formatShape(input?.shape)}</span>
@@ -729,7 +877,11 @@ function App() {
       </section>
 
       <aside className="inspector" aria-label="Node inspector">
-        {inspectorNode ? <NodeInspector node={inspectorNode} /> : <ModelSummary trace={trace} />}
+        {inspectorNode ? (
+          <NodeInspector node={inspectorNode} outgoingEdges={outgoingEdgesByNode.get(inspectorNode.id) ?? []} onFocusNode={focusNode} />
+        ) : (
+          <ModelSummary trace={trace} outputNodes={outputNodes} />
+        )}
       </aside>
 
       <button
