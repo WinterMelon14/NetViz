@@ -23,6 +23,10 @@
   --card-glass: rgba(13, 20, 32, 0.76);
   --node: #0e1724;
   --node-border: #223248;
+  --node-input: rgba(20, 43, 54, 0.92);
+  --node-input-border: rgba(80, 220, 190, 0.38);
+  --node-output: rgba(52, 43, 13, 0.9);
+  --node-output-border: rgba(250, 204, 21, 0.48);
   --border: #182434;
   --hairline: rgba(145, 172, 204, 0.12);
   --chip: #111d2c;
@@ -35,11 +39,9 @@
   --badge-hot: rgba(16, 38, 54, 0.98);
   --badge-border: rgba(43, 168, 255, 0.48);
   --badge-text: #cceeff;
-  --badge-input: #86efac;
   --badge-module: #75d7ff;
   --badge-function: #c4b5fd;
   --badge-method: #f0abfc;
-  --badge-output: #facc15;
   --interactive-border: rgba(117, 215, 255, 0.45);
   --interactive-soft: rgba(117, 215, 255, 0.11);
   --interactive-hover: rgba(117, 215, 255, 0.08);
@@ -84,6 +86,10 @@
   --card-glass: rgba(248, 251, 255, 0.82);
   --node: #ffffff;
   --node-border: #bdd0e3;
+  --node-input: #eefcf8;
+  --node-input-border: rgba(21, 128, 61, 0.28);
+  --node-output: #fff9dc;
+  --node-output-border: rgba(180, 83, 9, 0.36);
   --border: #d2deeb;
   --hairline: rgba(44, 68, 93, 0.11);
   --chip: #eef5fc;
@@ -96,11 +102,9 @@
   --badge-hot: rgba(232, 248, 255, 0.98);
   --badge-border: rgba(11, 120, 208, 0.4);
   --badge-text: #0d4e80;
-  --badge-input: #15803d;
   --badge-module: #0369a1;
   --badge-function: #6d28d9;
   --badge-method: #a21caf;
-  --badge-output: #b45309;
   --interactive-border: rgba(0, 120, 208, 0.34);
   --interactive-soft: rgba(0, 120, 208, 0.1);
   --interactive-hover: rgba(0, 120, 208, 0.08);

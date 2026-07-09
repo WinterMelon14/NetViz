@@ -414,16 +414,14 @@ function TensorDetail({
       className={`detail-block ${isInteractive ? 'detail-block--interactive' : ''}`}
       role={focusNodeId ? 'button' : undefined}
       tabIndex={focusNodeId ? 0 : undefined}
-      onClick={onTensorClick}
       onKeyDown={(event) => {
         if (focusNodeId && (event.key === 'Enter' || event.key === ' ')) onTensorClick()
       }}
     >
       <h3>
         {title}
-        {value.from_node ? <span>from {value.from_node}</span> : null}
       </h3>
-      {focusNodeId ? <InfoRow label="focus" value={<FocusButton nodeId={focusNodeId} onFocusNode={onFocusNode} />} /> : null}
+      {focusNodeId ? <InfoRow label="from" value={<FocusButton nodeId={focusNodeId} onFocusNode={onFocusNode} />} /> : null}
       {outputTargets.length ? (
         <div className="info-row">
           <span>to</span>
@@ -568,10 +566,12 @@ function ModelSummary({ trace, outputNodes }: { trace: TracePayload; outputNodes
 
 function NodeInspector({
   node,
+  incomingEdges,
   outgoingEdges,
   onFocusNode,
 }: {
   node: TraceNode
+  incomingEdges: TraceEdge[]
   outgoingEdges: TraceEdge[]
   onFocusNode: (nodeId: string) => void
 }) {
@@ -582,7 +582,7 @@ function NodeInspector({
   return (
     <>
       <header className="inspector-header">
-        <p className="eyebrow">Node Inspector</p>
+        <p className="eyebrow">Inspector</p>
         <h2>{node.label}</h2>
         <div className="node-meta">
           <span>id: {node.id}</span>
@@ -610,7 +610,10 @@ function NodeInspector({
 
       <CollapsibleSection title="Inputs">
         <section className="stack-block">
-        {tensorInputs.length ? tensorInputs.map((input) => <TensorDetail key={input.index} title={`${input.index}`} value={input} focusNodeId={input.from_node} onFocusNode={onFocusNode} />) : <p className="empty-note">No tensor inputs</p>}
+        {tensorInputs.length ? tensorInputs.map((input) => {
+          const sourceNodeId = input.from_node ?? incomingEdges.find((edge) => edge.target_input === input.index)?.source
+          return <TensorDetail key={input.index} title={`${input.index}`} value={input} focusNodeId={sourceNodeId} onFocusNode={onFocusNode} />
+        }) : <p className="empty-note">No tensor inputs</p>}
         </section>
       </CollapsibleSection>
 
@@ -680,6 +683,13 @@ function App() {
     })
     return map
   }, [trace])
+  const incomingEdgesByNode = useMemo(() => {
+    const map = new Map<string, TraceEdge[]>()
+    trace?.graph.edges.forEach((edge) => {
+      map.set(edge.target, [...(map.get(edge.target) ?? []), edge])
+    })
+    return map
+  }, [trace])
   const outputNodes = useMemo(() => {
     return layoutNodes.filter((node) => node.inputs.length > 0 && !(outgoingEdgesByNode.get(node.id)?.length))
   }, [layoutNodes, outgoingEdgesByNode])
@@ -732,11 +742,6 @@ function App() {
       centerNode(nodeId)
     }
     inspectorRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  function resetView() {
-    setView({ x: 36, y: 36, scale: 1 })
-    setSelectedNodeId(null)
   }
 
   useEffect(() => {
@@ -870,13 +875,6 @@ function App() {
     }
   }
 
-  function resetLayout() {
-    if (trace) {
-      window.localStorage.removeItem(layoutStorageKey(trace))
-    }
-    setLayoutPositions({})
-  }
-
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
   if (!trace || !layout) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
 
@@ -889,23 +887,28 @@ function App() {
         </div>
         <div className="toolbar">
           <button type="button" onClick={() => setIsLoadModalOpen(true)}>Load JSON</button>
-          <button type="button" onClick={resetView}>Reset</button>
-          <button type="button" onClick={resetLayout}>Reset Layout</button>
           <button type="button" onClick={fitView}>Fit Graph</button>
-          <label className="toolbar-field">
-            Layout
-            <select
-              value={layoutDirection}
-              onChange={(event) => {
-                setLayoutDirection(event.target.value as LayoutDirection)
-                setLayoutPositions({})
-              }}
-            >
-              <option value="left-right">Left to right</option>
-              <option value="top-bottom">Top to bottom</option>
-            </select>
-          </label>
-          <button type="button" onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={layoutDirection === 'left-right' ? 'Switch to top to bottom layout' : 'Switch to left to right layout'}
+            title={layoutDirection === 'left-right' ? 'Top to bottom' : 'Left to right'}
+            onClick={() => {
+              setLayoutDirection((current) => (current === 'left-right' ? 'top-bottom' : 'left-right'))
+              setLayoutPositions({})
+            }}
+          >
+            <span className={`layout-icon layout-icon--${layoutDirection}`} aria-hidden="true"></span>
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+          >
+            <span className="moon-icon" aria-hidden="true"></span>
+          </button>
         </div>
       </header>
 
@@ -962,7 +965,7 @@ function App() {
                   <button
                     key={node.id}
                     type="button"
-                    className={`graph-node ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
+                    className={`graph-node ${node.kind === 'input' ? 'graph-node--input' : ''} ${isOutputNode ? 'graph-node--output' : ''} ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
                     style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: nodeCardWidth(node) }}
                     onPointerDown={(event) => onNodePointerDown(event, node.id)}
                     onPointerMove={onNodePointerMove}
@@ -970,9 +973,8 @@ function App() {
                     onPointerCancel={onNodePointerUp}
                     onClick={() => selectNode(node.id)}
                   >
-                    <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span>
+                    {node.kind !== 'input' ? <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span> : null}
                     {node.module?.is_reused ? <span className="node-badge node-badge--shared">S</span> : null}
-                    {isOutputNode ? <span className="node-badge node-badge--output">O</span> : null}
                     <span className="node-title">
                       {node.label}
                       {explanation ? (
@@ -999,6 +1001,7 @@ function App() {
         {inspectorNode ? (
           <NodeInspector
             node={inspectorNode}
+            incomingEdges={incomingEdgesByNode.get(inspectorNode.id) ?? []}
             outgoingEdges={outgoingEdgesByNode.get(inspectorNode.id) ?? []}
             onFocusNode={(nodeId) => focusNode(nodeId, { centerCamera: true })}
           />
