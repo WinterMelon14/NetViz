@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, PointerEvent, ReactNode } from 'react'
+import type { ChangeEvent, PointerEvent } from 'react'
 import './App.css'
+import { CollapsibleSection } from './components/CollapsibleSection'
+import { InfoRow } from './components/InfoRow'
+import { RichTextView } from './components/RichTextView'
+import { richTextToString } from './components/richText'
+import { ShapeFlow } from './components/ShapeFlow'
+import { ShapePill } from './components/ShapePill'
+import { ValueDisplay } from './components/ValueDisplay'
 import { explainNode } from './explanations'
-import type { RichText } from './explanations'
-import { formatDtype, formatNumber, formatPreview, formatShape, formatUnknown, isShapeString, shapeParts } from './trace/format'
+import { formatDtype, formatNumber, formatPreview, formatShape, formatUnknown } from './trace/format'
 import { primaryInput, primaryOutput, tensorValues } from './trace/selectors'
 import type { ParamsInfo, TensorValue, TraceEdge, TraceNode, TracePayload } from './trace/types'
 
@@ -11,11 +17,6 @@ type NodePosition = {
   x: number
   y: number
 }
-
-type RichTextViewProps = {
-  value: RichText
-}
-
 
 type LayoutPositions = Record<string, NodePosition>
 type LayoutDirection = 'left-right' | 'top-bottom'
@@ -28,26 +29,6 @@ const padding = 64
 const minScale = 0.25
 const maxScale = 2.4
 const whiteboardPadding = 1800
-
-function RichTextView({ value }: RichTextViewProps) {
-  return (
-    <>
-      {value.map((part, index) =>
-        part.kind === 'code' ? (
-          <code key={index} className="code-text">
-            {part.text}
-          </code>
-        ) : (
-          <span key={index}>{part.text}</span>
-        ),
-      )}
-    </>
-  )
-}
-
-function richTextToString(value: RichText): string {
-  return value.map((part) => String(part.text)).join('')
-}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -201,49 +182,6 @@ function buildLayout(nodes: TraceNode[], edges: TraceEdge[], direction: LayoutDi
   }
 }
 
-function InfoRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value ?? 'n/a'}</strong>
-    </div>
-  )
-}
-
-function ShapePill({ shape }: { shape?: number[] }) {
-  return (
-    <span className="shape-pill" aria-label={formatShape(shape)}>
-      {shapeParts(shape).map((part, index) => (
-        <span className="shape-dim" key={`${part}-${index}`}>
-          {part}
-        </span>
-      ))}
-    </span>
-  )
-}
-
-function ShapeFlow({ input, output }: { input?: number[]; output?: number[] }) {
-  return (
-    <span className="shape-flow">
-      <ShapePill shape={input} />
-      <span className="shape-arrow">⟶</span>
-      <ShapePill shape={output} />
-    </span>
-  )
-}
-
-function ValueDisplay({ value }: { value: unknown }) {
-  if (Array.isArray(value) && value.every((item) => typeof item === 'number')) {
-    return <ShapePill shape={value} />
-  }
-
-  if (typeof value === 'string' && isShapeString(value)) {
-    if (value === 'scalar') return <ShapePill />
-    return <ShapePill shape={value.slice(1, -1).split(',').map((part) => Number(part.trim()))} />
-  }
-
-  return <>{String(value ?? 'n/a')}</>
-}
 
 function classifyShapeStep(from: unknown, to: unknown) {
   const fromText = formatUnknown(from)
@@ -253,17 +191,6 @@ function classifyShapeStep(from: unknown, to: unknown) {
   if (fromText === '-' || fromText === 'n/a' || fromText === 'undefined') return 'created'
   if (toText === '-' || toText === 'n/a' || toText === 'undefined') return 'reduced'
   return 'changed'
-}
-
-function CollapsibleSection({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
-  return (
-    <details className="collapse-section" open={defaultOpen}>
-      <summary>
-        <h3>{title}</h3>
-      </summary>
-      <div className="collapse-body">{children}</div>
-    </details>
-  )
 }
 
 function FocusButton({ nodeId, onFocusNode }: { nodeId: string; onFocusNode: (nodeId: string) => void }) {
