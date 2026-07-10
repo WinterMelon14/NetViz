@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, PointerEvent, ReactNode } from 'react'
 import './App.css'
 import { explainNode } from './explanations'
+import type { RichText } from './explanations'
 
 type TensorSummary = {
   numel?: number
@@ -98,6 +99,11 @@ type NodePosition = {
   y: number
 }
 
+type RichTextViewProps = {
+  value: RichText
+}
+
+
 type LayoutPositions = Record<string, NodePosition>
 type LayoutDirection = 'left-right' | 'top-bottom'
 
@@ -109,6 +115,26 @@ const padding = 64
 const minScale = 0.25
 const maxScale = 2.4
 const whiteboardPadding = 1800
+
+function RichTextView({ value }: RichTextViewProps) {
+  return (
+    <>
+      {value.map((part, index) =>
+        part.kind === 'code' ? (
+          <code key={index} className="code-text">
+            {part.text}
+          </code>
+        ) : (
+          <span key={index}>{part.text}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+function richTextToString(value: RichText): string {
+  return value.map((part) => String(part.text)).join('')
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -466,8 +492,12 @@ function TransformationDetail({ node }: { node: TraceNode }) {
 
   return (
     <section className="transformation-detail">
-      <p className="transformation-short">{explanation.short}</p>
-      <p>{explanation.description}</p>
+      <p className="transformation-short">
+        <RichTextView value={explanation.short} />
+      </p>
+      <p>
+        <RichTextView value={explanation.description} />
+      </p>
       <InfoRow label="input shape" value={<ValueDisplay value={inputShape} />} />
       <InfoRow label="output shape" value={<ValueDisplay value={outputShape} />} />
       {explanation.shapeSteps.map((step) => (
@@ -978,9 +1008,14 @@ function App() {
                     <span className="node-title">
                       {node.label}
                       {explanation ? (
-                        <span className="shape-help" aria-label={explanation.short}>
+                        <span
+                          className="shape-help"
+                          aria-label={richTextToString(explanation.short)}
+                        >
                           ?
-                          <span className="shape-tooltip">{explanation.short}</span>
+                          <span className="shape-tooltip">
+                            <RichTextView value={explanation.short} />
+                          </span>
                         </span>
                       ) : null}
                     </span>
