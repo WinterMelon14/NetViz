@@ -26,13 +26,48 @@ function layoutStorageKey(payload: TracePayload) {
   return `trace-layout:${hashTrace(payload)}`
 }
 
+function warnMalformedStoredLayout(error?: unknown) {
+  if (!import.meta.env.DEV) return
+  console.warn('Discarding malformed saved graph layout positions.', error)
+}
+
+function isNodePosition(value: unknown): value is NodePosition {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.x === 'number' && Number.isFinite(candidate.x)
+    && typeof candidate.y === 'number' && Number.isFinite(candidate.y)
+}
+
+function isLayoutPositions(value: unknown): value is LayoutPositions {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.values(value).every(isNodePosition)
+}
+
 export function loadStoredPositions(payload: TracePayload): LayoutPositions {
+  const key = layoutStorageKey(payload)
   try {
-    const stored = window.localStorage.getItem(layoutStorageKey(payload))
+    const stored = window.localStorage.getItem(key)
     if (!stored) return {}
-    const parsed = JSON.parse(stored) as { layout?: { positions?: LayoutPositions } }
-    return parsed.layout?.positions ?? {}
-  } catch {
+    const parsed = JSON.parse(stored) as unknown
+    const positions = parsed && typeof parsed === 'object' && 'layout' in parsed
+      ? (parsed as { layout?: unknown }).layout
+      : undefined
+    const savedPositions = positions && typeof positions === 'object' && 'positions' in positions
+      ? (positions as { positions?: unknown }).positions
+      : undefined
+
+    if (isLayoutPositions(savedPositions)) return savedPositions
+
+    window.localStorage.removeItem(key)
+    warnMalformedStoredLayout()
+    return {}
+  } catch (error) {
+    try {
+      window.localStorage.removeItem(key)
+    } catch (removeError) {
+      warnMalformedStoredLayout(removeError)
+    }
+    warnMalformedStoredLayout(error)
     return {}
   }
 }
