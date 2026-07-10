@@ -1,56 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, PointerEvent } from 'react'
+import type { PointerEvent } from 'react'
 import './App.css'
-import { RichTextView } from './components/RichTextView'
-import { richTextToString } from './components/richText'
-import { ShapeFlow } from './components/ShapeFlow'
-import { explainNode } from './explanations'
 import { buildLayout } from './graph/buildLayout'
 import type { LayoutDirection } from './graph/buildLayout'
-import { maxScale, minScale, nodeHeight, nodeWidth, whiteboardPadding } from './graph/constants'
+import { maxScale, minScale, nodeHeight, whiteboardPadding } from './graph/constants'
+import { GraphPanel } from './graph/GraphPanel'
 import { loadStoredPositions, saveStoredPositions } from './graph/layoutStorage'
 import type { LayoutPositions } from './graph/layoutStorage'
+import { nodeCardWidth } from './graph/nodePresentation'
 import { ModelSummary } from './inspector/ModelSummary'
 import { NodeInspector } from './inspector/NodeInspector'
 import { parseTraceJson } from './trace/parseTraceJson'
-import { primaryInput, primaryOutput } from './trace/selectors'
-import type { TraceEdge, TraceNode, TracePayload } from './trace/types'
+import { TraceLoadDialog } from './trace/TraceLoadDialog'
+import type { TraceEdge, TracePayload } from './trace/types'
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function nodeCardWidth(node: TraceNode) {
-  const inputDims = primaryInput(node)?.shape?.length ?? 1
-  const outputDims = primaryOutput(node)?.shape?.length ?? 1
-  const shapeFlowWidth = 72 + (inputDims + outputDims) * 24
-  const titleWidth = 76 + node.label.length * 8
-
-  return Math.max(nodeWidth, shapeFlowWidth, titleWidth)
-}
-
-function totalParamLabel(node: TraceNode) {
-  if (node.params?.count && node.params.count > 0) {
-    return `${node.params.count.toLocaleString()} params`
-  }
-  return node.params?.memory?.human ?? 'no params'
-}
-
-function kindBadge(node: TraceNode) {
-  const labelByKind: Record<string, string> = {
-    input: 'I',
-    module: 'M',
-    function: 'F',
-    method: 'T',
-  }
-
-  return labelByKind[node.kind] ?? node.kind.slice(0, 1).toUpperCase()
-}
-
 function App() {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const inspectorRef = useRef<HTMLElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragRef = useRef({ active: false, x: 0, y: 0, moved: false })
   const nodeDragRef = useRef({ active: false, nodeId: '', x: 0, y: 0, startNodeX: 0, startNodeY: 0, moved: false })
   const [trace, setTrace] = useState<TracePayload | null>(null)
@@ -107,6 +77,7 @@ function App() {
   const outputNodes = useMemo(() => {
     return layoutNodes.filter((node) => node.inputs.length > 0 && !(outgoingEdgesByNode.get(node.id)?.length))
   }, [layoutNodes, outgoingEdgesByNode])
+  const outputNodeIds = useMemo(() => new Set(outputNodes.map((node) => node.id)), [outputNodes])
   const selectedNode = selectedNodeId ? nodesById.get(selectedNodeId) : undefined
   const inspectorNode = selectedNode
   const stageBounds = useMemo(() => {
@@ -263,10 +234,7 @@ function App() {
     setLoadError(null)
   }
 
-  function loadJsonFromFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
-
+  function loadJsonFromFile(file: File) {
     file
       .text()
       .then((text) => {
@@ -275,9 +243,6 @@ function App() {
         setIsLoadModalOpen(false)
       })
       .catch((fileError: Error) => setLoadError(fileError.message))
-      .finally(() => {
-        event.target.value = ''
-      })
   }
 
   function loadJsonFromText() {
@@ -326,95 +291,25 @@ function App() {
         </div>
       </header>
 
-      <section className="graph-panel" aria-label={`${trace.model_name} graph`}>
-        <div
-          ref={viewportRef}
-          className="graph-viewport"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          <div className="graph-transform" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
-            <div className="graph-stage" style={{ width: stageBounds.width, height: stageBounds.height }}>
-              <svg className="edge-layer" width={stageBounds.width} height={stageBounds.height} aria-hidden="true">
-                {trace.graph.edges.map((edge) => {
-                  const source = nodesById.get(edge.source)
-                  const target = nodesById.get(edge.target)
-                  if (!source || !target) return null
-                  const sourceWidth = nodeCardWidth(source)
-                  const targetWidth = nodeCardWidth(target)
-                  const startX = layoutDirection === 'left-right' ? source.x + sourceWidth : source.x + sourceWidth / 2
-                  const startY = layoutDirection === 'left-right' ? source.y + nodeHeight / 2 : source.y + nodeHeight
-                  const endX = layoutDirection === 'left-right' ? target.x : target.x + targetWidth / 2
-                  const endY = layoutDirection === 'left-right' ? target.y + nodeHeight / 2 : target.y
-                  const curve = Math.max(60, layoutDirection === 'left-right' ? (endX - startX) / 2 : (endY - startY) / 2)
-                  const isSelected = selectedNodeId === edge.source
-
-                  const path =
-                    layoutDirection === 'left-right'
-                      ? `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`
-                      : `M ${startX} ${startY} C ${startX} ${startY + curve}, ${endX} ${endY - curve}, ${endX} ${endY}`
-
-                  return (
-                    <g key={edge.id}>
-                      <path
-                        className={`edge ${isSelected ? 'edge--active' : ''}`}
-                        d={path}
-                      />
-                      {isSelected ? <path className="edge-streak" d={path} /> : null}
-                    </g>
-                  )
-                })}
-              </svg>
-
-              {layoutNodes.map((node) => {
-                const input = primaryInput(node)
-                const output = primaryOutput(node)
-                const isSelected = node.id === selectedNodeId
-                const isOutputNode = outputNodes.some((outputNode) => outputNode.id === node.id)
-                const explanation = explainNode(node)
-
-                return (
-                  <button
-                    key={node.id}
-                    type="button"
-                    className={`graph-node ${node.kind === 'input' ? 'graph-node--input' : ''} ${isOutputNode ? 'graph-node--output' : ''} ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
-                    style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: nodeCardWidth(node) }}
-                    onPointerDown={(event) => onNodePointerDown(event, node.id)}
-                    onPointerMove={onNodePointerMove}
-                    onPointerUp={onNodePointerUp}
-                    onPointerCancel={onNodePointerUp}
-                    onClick={() => selectNode(node.id)}
-                  >
-                    {node.kind !== 'input' ? <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span> : null}
-                    {node.module?.is_reused ? <span className="node-badge node-badge--shared">S</span> : null}
-                    <span className="node-title">
-                      {node.label}
-                      {explanation ? (
-                        <span
-                          className="shape-help"
-                          aria-label={richTextToString(explanation.short)}
-                        >
-                          ?
-                          <span className="shape-tooltip">
-                            <RichTextView value={explanation.short} />
-                          </span>
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="node-label">
-                      <ShapeFlow input={input?.shape} output={output?.shape} />
-                    </span>
-                    <span className="node-kind">{node.kind}</span>
-                    <span className="node-param">{totalParamLabel(node)} / {primaryOutput(node)?.memory?.human ?? '0 B'} act</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
+      <GraphPanel
+        modelName={trace.model_name}
+        viewportRef={viewportRef}
+        nodes={layoutNodes}
+        edges={trace.graph.edges}
+        nodesById={nodesById}
+        outputNodeIds={outputNodeIds}
+        stageBounds={stageBounds}
+        view={view}
+        layoutDirection={layoutDirection}
+        selectedNodeId={selectedNodeId}
+        onViewportPointerDown={onPointerDown}
+        onViewportPointerMove={onPointerMove}
+        onViewportPointerUp={onPointerUp}
+        onNodePointerDown={onNodePointerDown}
+        onNodePointerMove={onNodePointerMove}
+        onNodePointerUp={onNodePointerUp}
+        onSelectNode={selectNode}
+      />
 
       <aside ref={inspectorRef} className="inspector" aria-label="Node inspector">
         {inspectorNode ? (
@@ -439,32 +334,17 @@ function App() {
       </button>
 
       {isLoadModalOpen ? (
-        <div className="modal-backdrop" role="presentation">
-          <section className="load-modal" role="dialog" aria-modal="true" aria-labelledby="load-json-title">
-            <header>
-              <div>
-                <p className="eyebrow">Trace Loader</p>
-                <h2 id="load-json-title">Load JSON</h2>
-              </div>
-              <button type="button" className="icon-button" aria-label="Close loader" onClick={() => setIsLoadModalOpen(false)}>x</button>
-            </header>
-            <textarea
-              value={jsonText}
-              onChange={(event) => {
-                setJsonText(event.target.value)
-                setLoadError(null)
-              }}
-              spellCheck={false}
-              placeholder="Paste trace JSON here..."
-            />
-            {loadError ? <p className="load-error">{loadError}</p> : null}
-            <footer>
-              <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={loadJsonFromFile} />
-              <button type="button" onClick={() => fileInputRef.current?.click()}>Select File</button>
-              <button type="button" className="primary-button" onClick={loadJsonFromText}>Load Pasted JSON</button>
-            </footer>
-          </section>
-        </div>
+        <TraceLoadDialog
+          jsonText={jsonText}
+          loadError={loadError}
+          onJsonTextChange={(text) => {
+            setJsonText(text)
+            setLoadError(null)
+          }}
+          onFileSelected={loadJsonFromFile}
+          onLoadPastedJson={loadJsonFromText}
+          onClose={() => setIsLoadModalOpen(false)}
+        />
       ) : null}
     </main>
   )
