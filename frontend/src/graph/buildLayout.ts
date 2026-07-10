@@ -3,6 +3,16 @@ import { columnGap, nodeHeight, nodeWidth, padding, rowGap } from './constants'
 
 export type LayoutDirection = 'left-right' | 'top-bottom'
 
+export type LayoutResult = {
+  nodes: (TraceNode & {
+    depth: number
+    x: number
+    y: number
+  })[]
+  width: number
+  height: number
+}
+
 function maxColumnSpan(columns: Map<number, TraceNode[]>, direction: LayoutDirection) {
   const primarySize = direction === 'left-right' ? nodeHeight : nodeWidth
   return Math.max(
@@ -11,7 +21,7 @@ function maxColumnSpan(columns: Map<number, TraceNode[]>, direction: LayoutDirec
   )
 }
 
-export function buildLayout(nodes: TraceNode[], edges: TraceEdge[], direction: LayoutDirection) {
+export function buildLayout(nodes: TraceNode[], edges: TraceEdge[], direction: LayoutDirection): LayoutResult {
   const nodeIds = new Set(nodes.map((node) => node.id))
   const inbound = new Map(nodes.map((node) => [node.id, 0]))
   const outgoing = new Map<string, string[]>()
