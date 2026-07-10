@@ -359,7 +359,7 @@ function ShapeFlow({ input, output }: { input?: number[]; output?: number[] }) {
   return (
     <span className="shape-flow">
       <ShapePill shape={input} />
-      <span className="shape-arrow">-&gt;</span>
+      <span className="shape-arrow">⟶</span>
       <ShapePill shape={output} />
     </span>
   )
@@ -508,7 +508,7 @@ function TransformationDetail({ node }: { node: TraceNode }) {
               <span>change</span>
               <strong className="shape-change">
                 <ValueDisplay value={step.from ?? 'n/a'} />
-                <span className="shape-arrow">-&gt;</span>
+                <span className="shape-arrow">⟶</span>
                 <ValueDisplay value={step.to ?? 'n/a'} />
               </strong>
             </div>

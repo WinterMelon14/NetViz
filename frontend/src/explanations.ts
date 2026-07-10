@@ -122,7 +122,7 @@ function explainLinear(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: node.formula ?? 'y = xW^T + b',
-      substitution: `${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -165,7 +165,7 @@ function explainFlatten(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = reshape(input)',
-      substitution: `${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -236,9 +236,9 @@ function explainConv2d(node: TraceNodeForExplanation): Explanation | null {
     title: 'Conv2d',
     short: rich(
       'Maps channels ',
-      code(`${c} → ${c2}`),
+      code(`${c} ⟶ ${c2}`),
       ' and spatial size ',
-      code(`${h}x${w} → ${hOut}x${wOut}`),
+      code(`${h}x${w} ⟶ ${hOut}x${wOut}`),
     ),
     description: rich(
       code('Conv2d'),
@@ -255,7 +255,7 @@ function explainConv2d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
-      substitution: `${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
@@ -286,7 +286,7 @@ function explainCat(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = concat(inputs, dim)',
-      substitution: `${inputShapes.map(shapeText).join(' + ')} -> ${shapeText(outputShape)}`,
+      substitution: `${inputShapes.map(shapeText).join(' + ')} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -334,7 +334,7 @@ function explainAdd(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = a + b',
-      substitution: `${shapeText(shapeA)} + ${shapeText(shapeB)} -> ${shapeText(outputShape)}`,
+      substitution: `${shapeText(shapeA)} + ${shapeText(shapeB)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -375,7 +375,7 @@ const inputShape = tensorValues(node.inputs)[0]?.shape
     ),
     formula: {
       display: `out = ${"reshape"}(input, shape)`,
-      substitution: `${shapeText(inputShape)} (${totalIn} elements) -> ${shapeText(resolvedOutputShape)}`,
+      substitution: `${shapeText(inputShape)} (${totalIn} elements) ⟶ ${shapeText(resolvedOutputShape)}`,
     },
     shapeSteps: [
       {
@@ -425,7 +425,7 @@ function explainView(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: `out = ${"view"}(input, shape)`,
-      substitution: `${shapeText(inputShape)} (${totalIn} elements) -> ${shapeText(resolvedOutputShape)}`,
+      substitution: `${shapeText(inputShape)} (${totalIn} elements) ⟶ ${shapeText(resolvedOutputShape)}`,
     },
     shapeSteps: [
       {
@@ -463,7 +463,7 @@ function explainPermute(node: TraceNodeForExplanation): Explanation | null {
     short: rich(
       'Reorders dimensions: ',
       code(shapeText(inputShape)),
-      ' → ',
+      ' ⟶ ',
       code(shapeText(outputShape)),
       ...(dims ? [' using order ', code(`(${dims.join(', ')})`)] : []),
       '.',
@@ -474,7 +474,7 @@ function explainPermute(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = input.permute(dims)',
-      substitution: `${shapeText(inputShape)} → ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: dims
       ? dims.map((sourceDim, targetDim) => ({
@@ -522,7 +522,7 @@ function explainEmbedding(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = weight[input]',
-      substitution: `${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -805,7 +805,7 @@ function explainPad(node: TraceNodeForExplanation): Explanation | null {
         : noPadDescription,
     formula: {
       display: 'out = F.pad(input, pad, mode, value)',
-      substitution: `pad=(${pad.join(', ')}): ${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+      substitution: `pad=(${pad.join(', ')}): ${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: dimSteps.length
       ? dimSteps
@@ -834,7 +834,7 @@ function explainGeneric(node: TraceNodeForExplanation): Explanation | null {
     formula: node.formula
       ? {
           display: node.formula,
-          substitution: `${shapeText(inputShape)} -> ${shapeText(outputShape)}`,
+          substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
         }
       : undefined,
     shapeSteps: [
