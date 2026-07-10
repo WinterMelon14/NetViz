@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
+import { Topbar } from './app/Topbar'
 import type { LayoutDirection } from './graph/buildLayout'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
@@ -89,42 +90,25 @@ function App() {
     focusNode(nodeId)
   }
 
+  function toggleLayoutDirection() {
+    setLayoutDirection((current) => (current === 'left-right' ? 'top-bottom' : 'left-right'))
+    setLayoutPositions({})
+  }
+
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
   if (!trace || !layout) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
 
   return (
     <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
-      <header className="topbar">
-        <div className="brand">
-          <span>PyTorch Trace</span>
-          <strong>{trace.model_name}</strong>
-        </div>
-        <div className="toolbar">
-          <button type="button" onClick={() => setIsLoadModalOpen(true)}>Load JSON</button>
-          <button type="button" onClick={fitView}>Fit Graph</button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={layoutDirection === 'left-right' ? 'Switch to top to bottom layout' : 'Switch to left to right layout'}
-            title={layoutDirection === 'left-right' ? 'Top to bottom' : 'Left to right'}
-            onClick={() => {
-              setLayoutDirection((current) => (current === 'left-right' ? 'top-bottom' : 'left-right'))
-              setLayoutPositions({})
-            }}
-          >
-            <span className={`layout-icon layout-icon--${layoutDirection}`} aria-hidden="true"></span>
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
-            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-          >
-            <span className="moon-icon" aria-hidden="true"></span>
-          </button>
-        </div>
-      </header>
+      <Topbar
+        modelName={trace.model_name}
+        layoutDirection={layoutDirection}
+        theme={theme}
+        onOpenLoader={() => setIsLoadModalOpen(true)}
+        onFitGraph={fitView}
+        onToggleLayout={toggleLayoutDirection}
+        onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+      />
 
       <GraphPanel
         modelName={trace.model_name}
