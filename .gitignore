@@ -34,3 +34,5 @@ eslint.config.js
 frontend/public
 frontend/README.md
 frontend/src/assets
+*.md
+scripts/

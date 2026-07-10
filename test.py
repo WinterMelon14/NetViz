@@ -239,5 +239,5 @@ model = PianoTranscriber()
 # Give it random input in the shape (384, 252)
 summary = model_summary(model, torch.randn(1, 1, 100, 252))
 # Save output to frontend/public/branchy.json
-with open("frontend/public/branchy3.json", "w") as f:
+with open("frontend/public/branchy.json", "w") as f:
     json.dump(summary, f)

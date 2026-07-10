@@ -26,8 +26,8 @@ def flatten_node_runtime_inputs(
     This is what lets torch.cat([x1, x2], dim=1) become:
 
     inputs: [
-      {"index": 0, "from_node": "x1", ...},
-      {"index": 1, "from_node": "x2", ...},
+      {"index": 0, "from": "x1", ...},
+      {"index": 1, "from": "x2", ...},
       {"index": 2, "role": "dim", "value": 1}
     ]
 

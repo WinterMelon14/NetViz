@@ -3,96 +3,9 @@ import type { ChangeEvent, PointerEvent, ReactNode } from 'react'
 import './App.css'
 import { explainNode } from './explanations'
 import type { RichText } from './explanations'
-
-type TensorSummary = {
-  numel?: number
-  min?: number
-  max?: number
-  mean?: number
-  std?: number
-  zeros_pct?: number
-  has_nan?: boolean
-  has_inf?: boolean
-}
-
-type TensorValue = {
-  index: number
-  role: string
-  shape?: number[]
-  dtype?: string
-  preview?: number[]
-  summary?: TensorSummary
-  memory?: {
-    num_bytes?: number
-    human?: string
-  }
-  from_node?: string
-  source_output?: number
-  value?: unknown
-}
-
-type ParamsInfo = {
-  count?: number
-  shapes?: Record<string, number[]>
-  dtypes?: Record<string, string>
-  memory?: {
-    num_bytes?: number
-    human?: string
-  }
-}
-
-type TraceNode = {
-  id: string
-  kind: string
-  label: string
-  fx_op: string
-  target: string
-  inputs: TensorValue[]
-  outputs: TensorValue[]
-  module?: {
-    path?: string
-    type?: string
-    is_reused?: boolean
-    reuse_count?: number
-  }
-  params?: ParamsInfo
-  attrs?: Record<string, unknown>
-  formula?: string
-}
-
-type TraceEdge = {
-  id: string
-  source: string
-  target: string
-  source_output: number
-  target_input: number
-}
-
-type TraceStats = {
-  total_nodes?: number
-  total_edges?: number
-  total_params?: number
-  trainable_params?: number
-  non_trainable_params?: number
-  total_param_memory?: { human?: string }
-  total_activation_memory?: { human?: string }
-  input_specs?: {
-    index: number
-    name?: string
-    shape?: number[]
-    dtype?: string
-    memory?: { human?: string }
-  }[]
-}
-
-type TracePayload = {
-  model_name: string
-  stats?: TraceStats
-  graph: {
-    nodes: TraceNode[]
-    edges: TraceEdge[]
-  }
-}
+import { formatDtype, formatNumber, formatPreview, formatShape, formatUnknown, isShapeString, shapeParts } from './trace/format'
+import { primaryInput, primaryOutput, tensorValues } from './trace/selectors'
+import type { ParamsInfo, TensorValue, TraceEdge, TraceNode, TracePayload } from './trace/types'
 
 type NodePosition = {
   x: number
@@ -140,30 +53,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function formatShape(shape?: number[]) {
-  return shape ? `[${shape.join(', ')}]` : 'scalar'
-}
-
-function shapeParts(shape?: number[]) {
-  return shape?.map((dim) => String(dim)) ?? ['scalar']
-}
-
-function formatDtype(dtype?: string) {
-  return dtype?.replace('torch.', '') ?? 'n/a'
-}
-
-function tensorValues(values: TensorValue[]) {
-  return values.filter((value) => value.shape || value.summary)
-}
-
-function primaryInput(node: TraceNode) {
-  return tensorValues(node.inputs)[0]
-}
-
-function primaryOutput(node: TraceNode) {
-  return tensorValues(node.outputs)[0]
-}
-
 function nodeCardWidth(node: TraceNode) {
   const inputDims = primaryInput(node)?.shape?.length ?? 1
   const outputDims = primaryOutput(node)?.shape?.length ?? 1
@@ -171,28 +60,6 @@ function nodeCardWidth(node: TraceNode) {
   const titleWidth = 76 + node.label.length * 8
 
   return Math.max(nodeWidth, shapeFlowWidth, titleWidth)
-}
-
-function formatNumber(value?: number, digits = 3, suffix = '') {
-  if (typeof value !== 'number') return 'n/a'
-  if (value === 0) return `0${suffix}`
-  return `${value.toFixed(Math.abs(value) >= 100 ? 1 : digits)}${suffix}`
-}
-
-function formatPreview(values?: number[]) {
-  if (!values?.length) return 'n/a'
-  const preview = values.slice(0, 4).map((value) => formatNumber(value, 4))
-  return `[${preview.join(', ')}${values.length > 4 ? ', ...' : ''}]`
-}
-
-function formatUnknown(value: unknown) {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (value === null || value === undefined) return 'n/a'
-  return JSON.stringify(value)
-}
-
-function isShapeString(value: string) {
-  return value === 'scalar' || /^\[[\d\s,\-]+\]$/.test(value)
 }
 
 function parseTraceJson(text: string) {
@@ -641,7 +508,7 @@ function NodeInspector({
       <CollapsibleSection title="Inputs">
         <section className="stack-block">
         {tensorInputs.length ? tensorInputs.map((input) => {
-          const sourceNodeId = input.from_node ?? incomingEdges.find((edge) => edge.target_input === input.index)?.source
+          const sourceNodeId = input.from ?? incomingEdges.find((edge) => edge.target_input === input.index)?.source
           return <TensorDetail key={input.index} title={`${input.index}`} value={input} focusNodeId={sourceNodeId} onFocusNode={onFocusNode} />
         }) : <p className="empty-note">No tensor inputs</p>}
         </section>

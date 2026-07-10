@@ -16,7 +16,7 @@ export type TensorValue = {
   memory?: {
     human?: string
   }
-  from_node?: string
+  from?: string
   source_output?: number
   value?: unknown
 }
