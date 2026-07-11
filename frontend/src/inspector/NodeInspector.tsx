@@ -21,6 +21,7 @@ export function NodeInspector({
   const tensorInputs = tensorValues(node.inputs)
   const tensorOutputs = tensorValues(node.outputs)
   const attrEntries = Object.entries(node.attrs ?? {})
+  const isInputNode = node.kind === 'input'
 
   return (
     <>
@@ -47,18 +48,22 @@ export function NodeInspector({
         </CollapsibleSection>
       ) : null}
 
-      <CollapsibleSection title="Transformation">
-        <TransformationDetail node={node} />
-      </CollapsibleSection>
+      {isInputNode ? null : (
+        <CollapsibleSection title="Transformation">
+          <TransformationDetail node={node} />
+        </CollapsibleSection>
+      )}
 
-      <CollapsibleSection title="Inputs">
-        <section className="stack-block">
-        {tensorInputs.length ? tensorInputs.map((input) => {
-          const sourceNodeId = input.from ?? incomingEdges.find((edge) => edge.target_input === input.index)?.source
-          return <TensorDetail key={input.index} title={`${input.index}`} value={input} focusNodeId={sourceNodeId} onFocusNode={onFocusNode} />
-        }) : <p className="empty-note">No tensor inputs</p>}
-        </section>
-      </CollapsibleSection>
+      {isInputNode ? null : (
+        <CollapsibleSection title="Inputs">
+          <section className="stack-block">
+          {tensorInputs.length ? tensorInputs.map((input) => {
+            const sourceNodeId = input.from ?? incomingEdges.find((edge) => edge.target_input === input.index)?.source
+            return <TensorDetail key={input.index} title={`${input.index}`} value={input} focusNodeId={sourceNodeId} onFocusNode={onFocusNode} />
+          }) : <p className="empty-note">No tensor inputs</p>}
+          </section>
+        </CollapsibleSection>
+      )}
 
       <CollapsibleSection title="Output">
         <section className="stack-block">
@@ -69,9 +74,11 @@ export function NodeInspector({
         </section>
       </CollapsibleSection>
 
-      <CollapsibleSection title="Params">
-        <ParamsDetail params={node.params} />
-      </CollapsibleSection>
+      {isInputNode ? null : (
+        <CollapsibleSection title="Params">
+          <ParamsDetail params={node.params} />
+        </CollapsibleSection>
+      )}
     </>
   )
 }

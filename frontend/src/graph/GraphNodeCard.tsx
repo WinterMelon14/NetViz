@@ -2,6 +2,7 @@ import type { PointerEvent } from 'react'
 import { RichTextView } from '../components/RichTextView'
 import { richTextToString } from '../components/richText'
 import { ShapeFlow } from '../components/ShapeFlow'
+import { ShapePill } from '../components/ShapePill'
 import { explainNode } from '../explanations'
 import { primaryInput, primaryOutput } from '../trace/selectors'
 import { kindBadge, nodeCardWidth, totalParamLabel } from './nodePresentation'
@@ -26,12 +27,13 @@ export function GraphNodeCard({
 }) {
   const input = primaryInput(node)
   const output = primaryOutput(node)
-  const explanation = explainNode(node)
+  const isInputNode = node.kind === 'input'
+  const explanation = isInputNode ? null : explainNode(node)
 
   return (
     <button
       type="button"
-      className={`graph-node ${node.kind === 'input' ? 'graph-node--input' : ''} ${isOutputNode ? 'graph-node--output' : ''} ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
+      className={`graph-node ${isInputNode ? 'graph-node--input' : ''} ${isOutputNode ? 'graph-node--output' : ''} ${isSelected ? 'graph-node--selected graph-node--active' : ''}`}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: nodeCardWidth(node) }}
       onPointerDown={(event) => onPointerDown(event, node.id)}
       onPointerMove={onPointerMove}
@@ -56,10 +58,10 @@ export function GraphNodeCard({
         ) : null}
       </span>
       <span className="node-label">
-        <ShapeFlow input={input?.shape} output={output?.shape} />
+        {isInputNode ? <ShapePill shape={output?.shape} /> : <ShapeFlow input={input?.shape} output={output?.shape} />}
       </span>
       <span className="node-kind">{node.kind}</span>
-      <span className="node-param">{totalParamLabel(node)} / {output?.memory?.human ?? '0 B'} act</span>
+      {isInputNode ? null : <span className="node-param">{totalParamLabel(node)} / {output?.memory?.human ?? '0 B'} act</span>}
     </button>
   )
 }
