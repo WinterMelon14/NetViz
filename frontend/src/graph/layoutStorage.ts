@@ -1,5 +1,7 @@
 import type { TracePayload } from '../trace/types'
 
+const layoutStorageVersion = 'elk-v1'
+
 export type NodePosition = {
   x: number
   y: number
@@ -9,6 +11,7 @@ export type LayoutPositions = Record<string, NodePosition>
 
 function hashTrace(payload: TracePayload) {
   const source = JSON.stringify({
+    layout_version: layoutStorageVersion,
     model_name: payload.model_name,
     nodes: payload.graph.nodes.map((node) => node.id),
     edges: payload.graph.edges.map((edge) => [edge.source, edge.target, edge.source_output, edge.target_input]),

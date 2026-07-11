@@ -1,7 +1,8 @@
-import * as dagre from 'dagre'
+import type { ELK as ElkApi, ElkNode } from 'elkjs'
 import type { TraceEdge, TraceNode } from '../trace/types'
-import { columnGap, nodeHeight, nodeWidth, padding, rowGap } from './constants'
+import { columnGap, nodeHeight, padding, rowGap } from './constants'
 import { nodeCardWidth } from './nodePresentation'
+
 export type LayoutResult = {
   nodes: (TraceNode & {
     depth: number
@@ -12,55 +13,108 @@ export type LayoutResult = {
   height: number
 }
 
-type DagreNode = {
-  x?: number
-  y?: number
-  rank?: number
+const layerTolerance = 1
+let elkInstance: ElkApi | null = null
+
+async function getElk() {
+  if (elkInstance) return elkInstance
+
+  const { default: ELK } = await import('elkjs/lib/elk.bundled.js')
+  elkInstance = new ELK()
+  return elkInstance
 }
 
-export function buildLayout(nodes: TraceNode[], edges: TraceEdge[]): LayoutResult {
-  const graph = new dagre.graphlib.Graph()
+function fallbackLayout(): LayoutResult {
+  return {
+    nodes: [],
+    width: padding * 2,
+    height: padding * 2,
+  }
+}
 
-  graph.setGraph({
-    rankdir: 'LR',
-    nodesep: rowGap,
-    ranksep: columnGap,
-    marginx: padding,
-    marginy: padding,
-  })
-  graph.setDefaultEdgeLabel(() => ({}))
+function depthByLayer(layoutNodes: { id: string; x: number }[]) {
+  const layers: number[] = []
 
-  const nodeIds = new Set(nodes.map((node) => node.id))
-
-  nodes.forEach((node) => {
-    graph.setNode(node.id, { width: nodeCardWidth(node), height: nodeHeight })
-  })
-
-  edges.forEach((edge) => {
-    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return
-    graph.setEdge(edge.source, edge.target)
-  })
-
-  dagre.layout(graph)
-
-  const layoutNodes = nodes.map((node) => {
-    const position = graph.node(node.id) as DagreNode | undefined
-    const x = position?.x ?? nodeWidth / 2
-    const y = position?.y ?? nodeHeight / 2
-
-    return {
-      ...node,
-      depth: position?.rank ?? 0,
-      x: x - nodeCardWidth(node) / 2,
-      y: y - nodeHeight / 2,
+  layoutNodes.forEach((node) => {
+    const existingLayer = layers.find((layerX) => Math.abs(layerX - node.x) <= layerTolerance)
+    if (existingLayer === undefined) {
+      layers.push(node.x)
     }
   })
 
-  const graphInfo = graph.graph()
+  layers.sort((left, right) => left - right)
+
+  return new Map(
+    layoutNodes.map((node) => {
+      const depth = layers.findIndex((layerX) => Math.abs(layerX - node.x) <= layerTolerance)
+      return [node.id, Math.max(0, depth)] as const
+    }),
+  )
+}
+
+function fallbackGraphSize(nodes: { x: number; y: number; width: number; height: number }[]) {
+  return {
+    width: Math.max(padding * 2, ...nodes.map((node) => node.x + node.width + padding)),
+    height: Math.max(padding * 2, ...nodes.map((node) => node.y + node.height + padding)),
+  }
+}
+
+export async function buildLayout(nodes: TraceNode[], edges: TraceEdge[]): Promise<LayoutResult> {
+  if (!nodes.length) return fallbackLayout()
+
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  const elkGraph: ElkNode = {
+    id: 'trace-root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.spacing.nodeNode': String(rowGap),
+      'elk.layered.spacing.nodeNodeBetweenLayers': String(columnGap),
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+      'elk.padding': `[top=${padding},left=${padding},bottom=${padding},right=${padding}]`,
+    },
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: nodeCardWidth(node),
+      height: nodeHeight,
+    })),
+    edges: edges
+      .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      .map((edge) => ({
+        id: edge.id,
+        sources: [edge.source],
+        targets: [edge.target],
+      })),
+  }
+
+  const elk = await getElk()
+  const graph = await elk.layout(elkGraph)
+  const childrenById = new Map((graph.children ?? []).map((node) => [node.id, node]))
+  const positionedNodes = nodes.map((node) => {
+    const layoutNode = childrenById.get(node.id)
+    const width = layoutNode?.width ?? nodeCardWidth(node)
+    const height = layoutNode?.height ?? nodeHeight
+
+    return {
+      id: node.id,
+      x: layoutNode?.x ?? padding,
+      y: layoutNode?.y ?? padding,
+      width,
+      height,
+    }
+  })
+  const depths = depthByLayer(positionedNodes)
+  const graphSize = fallbackGraphSize(positionedNodes)
 
   return {
-    nodes: layoutNodes,
-    width: graphInfo.width ?? 0,
-    height: graphInfo.height ?? 0,
+    nodes: nodes.map((node, index) => ({
+      ...node,
+      depth: depths.get(node.id) ?? 0,
+      x: positionedNodes[index]?.x ?? padding,
+      y: positionedNodes[index]?.y ?? padding,
+    })),
+    width: graph.width ?? graphSize.width,
+    height: graph.height ?? graphSize.height,
   }
 }

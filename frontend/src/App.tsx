@@ -40,6 +40,8 @@ function App() {
     outputNodeIds,
     inspectorNode,
     stageBounds,
+    isLayoutPending,
+    layoutError,
   } = useGraphModel({
     trace,
     layoutPositions,
@@ -88,7 +90,8 @@ function App() {
   }
 
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
-  if (!trace || !layout) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
+  if (layoutError) return <main className={`app-shell ${theme} app-shell--message`}>{layoutError}</main>
+  if (!trace || !layout || isLayoutPending) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
 
   return (
     <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>

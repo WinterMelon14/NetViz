@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { buildLayout } from './buildLayout'
+import type { LayoutResult } from './buildLayout'
 import { nodeHeight, whiteboardPadding } from './constants'
 import type { LayoutPositions } from './layoutStorage'
 import { nodeCardWidth } from './nodePresentation'
@@ -11,6 +12,13 @@ const emptyStageBounds: GraphStageBounds = {
   height: 3000,
 }
 
+type LayoutState = {
+  trace: TracePayload | null
+  layout: LayoutResult | null
+  isLayoutPending: boolean
+  layoutError: string | null
+}
+
 function edgeMap(edges: TraceEdge[] | undefined, key: 'source' | 'target') {
   const map = new Map<string, TraceEdge[]>()
   edges?.forEach((edge) => {
@@ -20,7 +28,7 @@ function edgeMap(edges: TraceEdge[] | undefined, key: 'source' | 'target') {
 }
 
 function graphStageBounds(
-  layout: ReturnType<typeof buildLayout> | null,
+  layout: LayoutResult | null,
   layoutNodes: PositionedTraceNode[],
 ) {
   const xs = layoutNodes.map((node) => node.x)
@@ -45,7 +53,52 @@ export function useGraphModel({
   layoutPositions: LayoutPositions
   selectedNodeId: string | null
 }) {
-  const layout = useMemo(() => (trace ? buildLayout(trace.graph.nodes, trace.graph.edges) : null), [trace])
+  const layoutRequestRef = useRef(0)
+  const [layoutState, setLayoutState] = useState<LayoutState>({
+    trace: null,
+    layout: null,
+    isLayoutPending: false,
+    layoutError: null,
+  })
+
+  useEffect(() => {
+    layoutRequestRef.current += 1
+    const requestId = layoutRequestRef.current
+    let isCancelled = false
+
+    if (!trace) return undefined
+
+    Promise.resolve()
+      .then(() => {
+        if (isCancelled || layoutRequestRef.current !== requestId) return undefined
+        setLayoutState({ trace, layout: null, isLayoutPending: true, layoutError: null })
+        return buildLayout(trace.graph.nodes, trace.graph.edges)
+      })
+      .then((nextLayout) => {
+        if (!nextLayout) return
+        if (isCancelled || layoutRequestRef.current !== requestId) return
+        setLayoutState({ trace, layout: nextLayout, isLayoutPending: false, layoutError: null })
+      })
+      .catch((error: unknown) => {
+        if (isCancelled || layoutRequestRef.current !== requestId) return
+        setLayoutState({
+          trace,
+          layout: null,
+          isLayoutPending: false,
+          layoutError: error instanceof Error ? error.message : 'Could not lay out graph.',
+        })
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [trace])
+
+  const isCurrentLayout = layoutState.trace === trace
+  const layout = isCurrentLayout ? layoutState.layout : null
+  const isLayoutPending = Boolean(trace) && (!isCurrentLayout || layoutState.isLayoutPending)
+  const layoutError = isCurrentLayout ? layoutState.layoutError : null
+
   const layoutNodes = useMemo(() => {
     return (
       layout?.nodes.map((node) => ({
@@ -76,5 +129,7 @@ export function useGraphModel({
     selectedNode,
     inspectorNode: selectedNode,
     stageBounds,
+    isLayoutPending,
+    layoutError,
   }
 }

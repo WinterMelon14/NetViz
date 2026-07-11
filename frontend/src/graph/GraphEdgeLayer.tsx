@@ -26,7 +26,7 @@ export function GraphEdgeLayer({
         const startY = source.y + nodeHeight / 2
         const endX = target.x
         const endY = target.y + nodeHeight / 2
-        const curve = Math.max(60, (endX - startX) / 2)
+        const curve = Math.max(60, Math.abs(endX - startX) / 2)
         const isSelected = selectedNodeId === edge.source
 
         const path = `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`
