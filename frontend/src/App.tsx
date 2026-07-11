@@ -14,7 +14,7 @@ function App() {
   const inspectorRef = useRef<HTMLElement | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
