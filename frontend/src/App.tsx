@@ -66,6 +66,7 @@ function App() {
     onNodePointerDown,
     onNodePointerMove,
     onNodePointerUp,
+    isDraggingNode,
     wasNodeDragged,
   } = useNodeDrag({
     layout,
@@ -116,6 +117,7 @@ function App() {
         stageBounds={stageBounds}
         view={view}
         selectedNodeId={selectedNodeId}
+        isDraggingNode={isDraggingNode}
         onViewportPointerDown={onViewportPointerDown}
         onViewportPointerMove={onViewportPointerMove}
         onViewportPointerUp={onViewportPointerUp}

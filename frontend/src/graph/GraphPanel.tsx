@@ -14,6 +14,7 @@ export function GraphPanel({
   stageBounds,
   view,
   selectedNodeId,
+  isDraggingNode,
   onViewportPointerDown,
   onViewportPointerMove,
   onViewportPointerUp,
@@ -31,6 +32,7 @@ export function GraphPanel({
   stageBounds: GraphStageBounds
   view: GraphView
   selectedNodeId: string | null
+  isDraggingNode: boolean
   onViewportPointerDown: (event: PointerEvent<HTMLDivElement>) => void
   onViewportPointerMove: (event: PointerEvent<HTMLDivElement>) => void
   onViewportPointerUp: (event: PointerEvent<HTMLDivElement>) => void
@@ -56,6 +58,7 @@ export function GraphPanel({
               nodesById={nodesById}
               stageBounds={stageBounds}
               selectedNodeId={selectedNodeId}
+              isDraggingNode={isDraggingNode}
             />
 
             {nodes.map((node) => (

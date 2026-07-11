@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { Dispatch, PointerEvent, SetStateAction } from 'react'
 import type { LayoutResult } from './buildLayout'
 import type { LayoutPositions } from './layoutStorage'
@@ -16,10 +16,12 @@ export function useNodeDrag({
   setLayoutPositions: Dispatch<SetStateAction<LayoutPositions>>
 }) {
   const nodeDragRef = useRef({ active: false, nodeId: '', x: 0, y: 0, startNodeX: 0, startNodeY: 0, moved: false })
+  const [isDraggingNode, setIsDraggingNode] = useState(false)
 
   const onNodePointerDown = useCallback((event: PointerEvent<HTMLButtonElement>, nodeId: string) => {
     event.stopPropagation()
     const node = nodesById.get(nodeId)
+    setIsDraggingNode(true)
     nodeDragRef.current = {
       active: true,
       nodeId,
@@ -51,6 +53,7 @@ export function useNodeDrag({
 
   const onNodePointerUp = useCallback(() => {
     nodeDragRef.current.active = false
+    setIsDraggingNode(false)
   }, [])
 
   const wasNodeDragged = useCallback(() => nodeDragRef.current.moved, [])
@@ -59,6 +62,7 @@ export function useNodeDrag({
     onNodePointerDown,
     onNodePointerMove,
     onNodePointerUp,
+    isDraggingNode,
     wasNodeDragged,
   }
 }

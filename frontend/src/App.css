@@ -148,6 +148,11 @@ select:focus-visible {
   filter: drop-shadow(0 0 10px var(--accent-hot-glow));
 }
 
+.edge--dragging-selected {
+  stroke: var(--accent-hot);
+  stroke-width: 3;
+}
+
 .edge-streak {
   fill: none;
   stroke: var(--edge-streak);
