@@ -14,7 +14,7 @@ function App() {
   const inspectorRef = useRef<HTMLElement | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [theme] = useState<'light' | 'dark'>('light')
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
@@ -89,6 +89,11 @@ function App() {
     focusNode(nodeId)
   }
 
+  function resetGraphPositions() {
+    setLayoutPositions({})
+    fitView()
+  }
+
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
   if (layoutError) return <main className={`app-shell ${theme} app-shell--message`}>{layoutError}</main>
   if (!trace || !layout || isLayoutPending) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
@@ -97,10 +102,8 @@ function App() {
     <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
       <Topbar
         modelName={trace.model_name}
-        theme={theme}
         onOpenLoader={() => setIsLoadModalOpen(true)}
-        onFitGraph={fitView}
-        onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+        onFitGraph={resetGraphPositions}
       />
 
       <GraphPanel

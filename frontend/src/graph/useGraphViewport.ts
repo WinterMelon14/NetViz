@@ -25,11 +25,15 @@ export function useGraphViewport({
   const fitView = useCallback(() => {
     if (!layout || !viewportRef.current) return
     const bounds = viewportRef.current.getBoundingClientRect()
-    const scale = clamp(Math.min((bounds.width - 80) / layout.width, (bounds.height - 80) / layout.height), minScale, 1.4)
+    const inputNode = layout.nodes.find((node) => node.kind === 'input') ?? layout.nodes[0]
+    const scale = minScale
+
+    if (!inputNode) return
+
     setView({
       scale,
-      x: (bounds.width - layout.width * scale) / 2,
-      y: (bounds.height - layout.height * scale) / 2,
+      x: 36 - inputNode.x * scale,
+      y: bounds.height / 2 - (inputNode.y + nodeHeight / 2) * scale,
     })
   }, [layout])
 
