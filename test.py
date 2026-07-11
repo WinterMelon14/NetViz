@@ -233,11 +233,32 @@ class MultiInputModel(nn.Module):
         output = self.classifier(combined)
         return output
 
-from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
-model = PianoTranscriber()
+class doubleTrackModel(nn.Module):
+    def __init__(self):
+        super(doubleTrackModel, self).__init__()
+        self.track1 = nn.Sequential(
+            nn.Linear(10, 20),
+            nn.ReLU(),
+            nn.Linear(20, 10)
+        )
+        self.track2 = nn.Sequential(
+            nn.Linear(10, 15),
+            nn.ReLU(),
+            nn.Linear(15, 10)
+        )
+        self.final_layer = nn.Linear(20, 5)  # Final output layer
 
-# Give it random input in the shape (384, 252)
-summary = model_summary(model, torch.randn(1, 1, 100, 252))
+    def forward(self, x):
+        out1 = self.track1(x)
+        out2 = self.track2(x)
+        combined = torch.cat((out1, out2), dim=1)  # Concatenate outputs
+        final_output = self.final_layer(combined)
+        return final_output
+
+from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
+model = doubleTrackModel()
+
+summary = model_summary(model, torch.randn(1, 10))
 # Save output to frontend/public/branchy.json
-with open("frontend/public/branchy.json", "w") as f:
+with open("frontend/public/branchy6.json", "w") as f:
     json.dump(summary, f)
