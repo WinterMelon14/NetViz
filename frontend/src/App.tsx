@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
+import { runKnownModelTrace } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -15,6 +16,8 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
   const [theme] = useState<'light' | 'dark'>('light')
+  const [isDesktopTraceRunning, setIsDesktopTraceRunning] = useState(false)
+  const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
@@ -25,6 +28,7 @@ function App() {
     loadError,
     layoutPositions,
     setLayoutPositions,
+    loadTracePayload,
     onJsonTextChange,
     loadJsonFromFile,
     loadJsonFromText,
@@ -95,6 +99,28 @@ function App() {
     fitView()
   }
 
+  function runDesktopTraceSpike() {
+    setDesktopTraceError(null)
+    setIsDesktopTraceRunning(true)
+    runKnownModelTrace()
+      .then((result) => {
+        if (result.type === 'success') {
+          if (result.trace.transfer === 'inline') {
+            loadTracePayload(result.trace.payload)
+          } else {
+            setDesktopTraceError('Desktop trace returned a file transfer, which is not implemented in this spike.')
+          }
+          return
+        }
+
+        setDesktopTraceError(result.error.message)
+      })
+      .catch((traceError: unknown) => {
+        setDesktopTraceError(traceError instanceof Error ? traceError.message : 'Desktop trace failed.')
+      })
+      .finally(() => setIsDesktopTraceRunning(false))
+  }
+
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
   if (layoutError) return <main className={`app-shell ${theme} app-shell--message`}>{layoutError}</main>
   if (!trace || !layout || isLayoutPending) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
@@ -105,6 +131,9 @@ function App() {
         modelName={trace.model_name}
         onOpenLoader={() => setIsLoadModalOpen(true)}
         onFitGraph={resetGraphPositions}
+        onRunDesktopTrace={runDesktopTraceSpike}
+        isDesktopTraceRunning={isDesktopTraceRunning}
+        desktopTraceError={desktopTraceError}
       />
 
       <GraphPanel

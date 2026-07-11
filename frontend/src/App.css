@@ -72,6 +72,17 @@
   display: none;
 }
 
+.toolbar-error {
+  max-width: 260px;
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 button,
 select {
   border: 1px solid var(--button-border);

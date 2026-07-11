@@ -71,6 +71,7 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     loadError,
     layoutPositions,
     setLayoutPositions,
+    loadTracePayload: applyTracePayload,
     onJsonTextChange,
     loadJsonFromFile,
     loadJsonFromText,
