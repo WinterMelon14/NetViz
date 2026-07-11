@@ -8,7 +8,7 @@ export const nodeHeight = 136
 export const columnGap = 128
 
 // Distance between sibling nodes within the same depth level.
-export const rowGap = 150
+export const rowGap = 130
 
 // Inner margin around the auto-laid-out graph before pan/zoom whiteboard padding is added.
 export const padding = 64

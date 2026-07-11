@@ -188,7 +188,13 @@ export async function buildLayout(
       nodeIds.has(edge.source) &&
       nodeIds.has(edge.target),
   )
-
+  /* 
+    A few options I like
+    Network + DF_MODEL_ORDER
+    Network + NETWORK_SIMPLEX
+    Brandes + NETWORK_SIMPLEX
+    Network + LONGEST_PATH_SOURCE
+  */
   const elkGraph: ElkNode = {
     id: 'trace-root',
     layoutOptions: {
@@ -198,6 +204,7 @@ export async function buildLayout(
       'elk.layered.spacing.nodeNodeBetweenLayers': String(columnGap),
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.layering.strategy': 'DF_MODEL_ORDER',
       'elk.padding':
         `[top=${padding},left=${padding},bottom=${padding},right=${padding}]`,
     },

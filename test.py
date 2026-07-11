@@ -255,10 +255,264 @@ class doubleTrackModel(nn.Module):
         final_output = self.final_layer(combined)
         return final_output
 
-from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
-model = doubleTrackModel()
 
-summary = model_summary(model, torch.randn(1, 10))
+class MultiTrackModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.stem = nn.Sequential(
+            nn.Linear(16, 32),
+            nn.ReLU(),
+        )
+
+        self.track1 = nn.Sequential(
+            nn.Linear(32, 48),
+            nn.ReLU(),
+            nn.Linear(48, 24),
+            nn.ReLU(),
+        )
+
+        self.track2 = nn.Sequential(
+            nn.Linear(32, 40),
+            nn.ReLU(),
+            nn.Linear(40, 32),
+            nn.ReLU(),
+            nn.Linear(32, 24),
+        )
+
+        self.track3 = nn.Sequential(
+            nn.Linear(32, 24),
+            nn.GELU(),
+        )
+
+        self.track4 = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 48),
+            nn.ReLU(),
+            nn.Linear(48, 24),
+        )
+
+        self.merge12 = nn.Sequential(
+            nn.Linear(48, 32),
+            nn.ReLU(),
+        )
+
+        self.merge34 = nn.Sequential(
+            nn.Linear(48, 32),
+            nn.ReLU(),
+        )
+
+        self.final = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 8),
+        )
+
+    def forward(self, x):
+        stem = self.stem(x)
+
+        out1 = self.track1(stem)
+        out2 = self.track2(stem)
+        out3 = self.track3(stem)
+        out4 = self.track4(stem)
+
+        merged12 = self.merge12(torch.cat((out1, out2), dim=1))
+        merged34 = self.merge34(torch.cat((out3, out4), dim=1))
+
+        combined = torch.cat((merged12, merged34), dim=1)
+        return self.final(combined)
+
+
+class ShortcutHeavyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.input_projection = nn.Linear(16, 32)
+
+        self.branch1_layer1 = nn.Linear(32, 32)
+        self.branch1_layer2 = nn.Linear(32, 32)
+        self.branch1_layer3 = nn.Linear(32, 32)
+
+        self.branch2_layer1 = nn.Linear(32, 48)
+        self.branch2_layer2 = nn.Linear(48, 32)
+
+        self.branch3_layer1 = nn.Linear(32, 24)
+        self.branch3_layer2 = nn.Linear(24, 24)
+        self.branch3_layer3 = nn.Linear(24, 32)
+
+        self.merge = nn.Linear(96, 32)
+
+        self.post_merge1 = nn.Linear(32, 32)
+        self.post_merge2 = nn.Linear(32, 32)
+
+        self.output = nn.Linear(32, 6)
+
+        self.relu = nn.ReLU()
+        self.gelu = nn.GELU()
+
+    def forward(self, x):
+        root = self.relu(self.input_projection(x))
+
+        # Long branch with a root-to-end shortcut.
+        branch1 = self.relu(self.branch1_layer1(root))
+        branch1 = self.relu(self.branch1_layer2(branch1))
+        branch1 = self.branch1_layer3(branch1)
+        branch1 = self.relu(branch1 + root)
+
+        # Medium branch with another shortcut.
+        branch2 = self.relu(self.branch2_layer1(root))
+        branch2 = self.branch2_layer2(branch2)
+        branch2 = self.relu(branch2 + root)
+
+        # Longer nonlinear branch.
+        branch3 = self.gelu(self.branch3_layer1(root))
+        branch3 = self.gelu(self.branch3_layer2(branch3))
+        branch3 = self.branch3_layer3(branch3)
+
+        merged = torch.cat(
+            (branch1, branch2, branch3),
+            dim=1,
+        )
+        merged = self.relu(self.merge(merged))
+
+        # Another A -> B -> C -> D plus A -> D pattern.
+        residual = merged
+        out = self.relu(self.post_merge1(merged))
+        out = self.post_merge2(out)
+        out = self.relu(out + residual)
+
+        return self.output(out)
+    
+class ComplicatedTrackModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.stem = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+        )
+
+        self.track_a = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+        )
+
+        self.track_b1 = nn.Linear(64, 96)
+        self.track_b2 = nn.Linear(96, 64)
+        self.track_b3 = nn.Linear(64, 32)
+
+        self.track_c = nn.Sequential(
+            nn.Linear(64, 48),
+            nn.GELU(),
+            nn.Linear(48, 32),
+        )
+
+        self.track_d1 = nn.Linear(64, 80)
+        self.track_d2 = nn.Linear(80, 80)
+        self.track_d3 = nn.Linear(80, 48)
+        self.track_d4 = nn.Linear(48, 32)
+
+        self.track_e = nn.Linear(64, 32)
+
+        self.merge_ab = nn.Sequential(
+            nn.Linear(64, 48),
+            nn.ReLU(),
+        )
+
+        self.merge_cd = nn.Sequential(
+            nn.Linear(64, 48),
+            nn.ReLU(),
+        )
+
+        self.middle_merge = nn.Sequential(
+            nn.Linear(128, 96),
+            nn.LayerNorm(96),
+            nn.ReLU(),
+            nn.Linear(96, 64),
+        )
+
+        self.late_track1 = nn.Sequential(
+            nn.Linear(64, 48),
+            nn.ReLU(),
+            nn.Linear(48, 32),
+        )
+
+        self.late_track2_layer1 = nn.Linear(64, 64)
+        self.late_track2_layer2 = nn.Linear(64, 32)
+
+        self.late_track3 = nn.Sequential(
+            nn.Linear(64, 40),
+            nn.GELU(),
+            nn.Linear(40, 40),
+            nn.GELU(),
+            nn.Linear(40, 32),
+        )
+
+        self.final_merge = nn.Sequential(
+            nn.Linear(96, 64),
+            nn.ReLU(),
+            nn.Linear(64, 16),
+            nn.ReLU(),
+            nn.Linear(16, 4),
+        )
+
+        self.relu = nn.ReLU()
+        self.gelu = nn.GELU()
+
+    def forward(self, x):
+        root = self.stem(x)
+
+        # Initial five-way split.
+        a = self.track_a(root)
+
+        b = self.relu(self.track_b1(root))
+        b = self.relu(self.track_b2(b))
+        b = self.track_b3(b)
+
+        c = self.track_c(root)
+
+        d = self.relu(self.track_d1(root))
+        d = self.relu(self.track_d2(d))
+        d = self.relu(self.track_d3(d))
+        d = self.track_d4(d)
+
+        e = self.track_e(root)
+
+        # First pair of merges.
+        ab = self.merge_ab(torch.cat((a, b), dim=1))
+        cd = self.merge_cd(torch.cat((c, d), dim=1))
+
+        # Merge those results with the untouched fifth track.
+        middle = torch.cat((ab, cd, e), dim=1)
+        middle = self.middle_merge(middle)
+
+        # Residual shortcut around the middle transformation.
+        middle = middle + root
+
+        # Late three-way split.
+        late1 = self.late_track1(middle)
+
+        late2 = self.relu(self.late_track2_layer1(middle))
+        late2 = self.late_track2_layer2(late2)
+
+        # Shortcut from the late split root to the end of track 2.
+        late2 = late2 + middle[:, :32]
+
+        late3 = self.late_track3(middle)
+
+        final_input = torch.cat(
+            (late1, late2, late3),
+            dim=1,
+        )
+
+        return self.final_merge(final_input)
+from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
+model = MultiTrackModel()
+
+summary = model_summary(model, torch.randn(1, 16))
 # Save output to frontend/public/branchy.json
-with open("frontend/public/branchy6.json", "w") as f:
+with open("frontend/public/branchy7.json", "w") as f:
     json.dump(summary, f)
