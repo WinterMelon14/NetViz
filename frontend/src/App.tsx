@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
-import { runKnownModelTrace } from './desktop/desktopTraceApi'
+import { cancelTrace, createTraceRunId, runKnownModelTrace, type TraceRunState } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -16,7 +16,8 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
   const [theme] = useState<'light' | 'dark'>('light')
-  const [isDesktopTraceRunning, setIsDesktopTraceRunning] = useState(false)
+  const [desktopTraceState, setDesktopTraceState] = useState<TraceRunState>('idle')
+  const activeDesktopRunId = useRef<string | null>(null)
   const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
@@ -99,26 +100,67 @@ function App() {
     fitView()
   }
 
+  function traceStateFromErrorCode(code: string): TraceRunState {
+    if (code === 'cancelled') return 'cancelled'
+    if (code === 'timeout') return 'timed_out'
+    return 'failed'
+  }
+
   function runDesktopTraceSpike() {
+    if (activeDesktopRunId.current) return
+
+    const runId = createTraceRunId()
+    activeDesktopRunId.current = runId
     setDesktopTraceError(null)
-    setIsDesktopTraceRunning(true)
-    runKnownModelTrace()
+    setDesktopTraceState('starting')
+    window.setTimeout(() => {
+      if (activeDesktopRunId.current === runId) {
+        setDesktopTraceState('running')
+      }
+    }, 0)
+
+    runKnownModelTrace(runId)
       .then((result) => {
+        if (activeDesktopRunId.current !== runId) return
+
         if (result.type === 'success') {
           if (result.trace.transfer === 'inline') {
             loadTracePayload(result.trace.payload)
+            setDesktopTraceState('succeeded')
           } else {
             setDesktopTraceError('Desktop trace returned a file transfer, which is not implemented in this spike.')
+            setDesktopTraceState('failed')
           }
           return
         }
 
         setDesktopTraceError(result.error.message)
+        setDesktopTraceState(traceStateFromErrorCode(result.error.code))
       })
       .catch((traceError: unknown) => {
+        if (activeDesktopRunId.current !== runId) return
         setDesktopTraceError(traceError instanceof Error ? traceError.message : 'Desktop trace failed.')
+        setDesktopTraceState('failed')
       })
-      .finally(() => setIsDesktopTraceRunning(false))
+      .finally(() => {
+        if (activeDesktopRunId.current === runId) {
+          activeDesktopRunId.current = null
+        }
+      })
+  }
+
+  function cancelDesktopTrace() {
+    const runId = activeDesktopRunId.current
+    if (!runId) return
+
+    cancelTrace(runId).then((result) => {
+      if (activeDesktopRunId.current !== runId) return
+      if (result.type === 'error') {
+        setDesktopTraceError(result.error.message)
+        setDesktopTraceState(traceStateFromErrorCode(result.error.code))
+      }
+      activeDesktopRunId.current = null
+    })
   }
 
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
@@ -132,7 +174,8 @@ function App() {
         onOpenLoader={() => setIsLoadModalOpen(true)}
         onFitGraph={resetGraphPositions}
         onRunDesktopTrace={runDesktopTraceSpike}
-        isDesktopTraceRunning={isDesktopTraceRunning}
+        onCancelDesktopTrace={cancelDesktopTrace}
+        desktopTraceState={desktopTraceState}
         desktopTraceError={desktopTraceError}
       />
 

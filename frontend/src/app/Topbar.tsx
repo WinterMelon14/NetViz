@@ -1,18 +1,28 @@
+import type { TraceRunState } from '../desktop/desktopTraceApi'
+
 export function Topbar({
   modelName,
   onOpenLoader,
   onFitGraph,
   onRunDesktopTrace,
-  isDesktopTraceRunning,
+  onCancelDesktopTrace,
+  desktopTraceState,
   desktopTraceError,
 }: {
   modelName: string
   onOpenLoader: () => void
   onFitGraph: () => void
   onRunDesktopTrace: () => void
-  isDesktopTraceRunning: boolean
+  onCancelDesktopTrace: () => void
+  desktopTraceState: TraceRunState
   desktopTraceError: string | null
 }) {
+  const isTraceActive = desktopTraceState === 'starting' || desktopTraceState === 'running'
+  const shouldShowRetry = desktopTraceState === 'failed' || desktopTraceState === 'cancelled' || desktopTraceState === 'timed_out'
+  const runLabel = isTraceActive
+    ? desktopTraceState === 'starting' ? 'Starting Trace...' : 'Running Trace...'
+    : shouldShowRetry ? 'Retry Desktop Trace' : 'Run Desktop Trace Spike'
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -21,9 +31,11 @@ export function Topbar({
       </div>
       <div className="toolbar">
         <button type="button" onClick={onOpenLoader}>Load JSON</button>
-        <button type="button" onClick={onRunDesktopTrace} disabled={isDesktopTraceRunning}>
-          {isDesktopTraceRunning ? 'Running Trace...' : 'Run Desktop Trace Spike'}
+        <button type="button" onClick={onRunDesktopTrace} disabled={isTraceActive}>
+          {runLabel}
         </button>
+        {isTraceActive ? <button type="button" onClick={onCancelDesktopTrace}>Cancel</button> : null}
+        {desktopTraceState !== 'idle' ? <span className="toolbar-status">{desktopTraceState}</span> : null}
         {desktopTraceError ? <span className="toolbar-error">{desktopTraceError}</span> : null}
         <button type="button" onClick={onFitGraph}><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 32 32">
   <path d="M0 0h32v32H0z" fill="none" />

@@ -2,6 +2,8 @@ import type { TracePayload } from '../trace/types'
 
 const protocolVersion = 1
 
+export type TraceRunState = 'idle' | 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
+
 type TraceTransfer =
   | { transfer: 'inline'; payload: TracePayload }
   | { transfer: 'file'; path: string }
@@ -34,7 +36,8 @@ declare global {
   interface Window {
     pywebview?: {
       api?: {
-        runKnownModelTrace?: () => Promise<unknown>
+        runKnownModelTrace?: (runId: string) => Promise<unknown>
+        cancelTrace?: (runId: string) => Promise<unknown>
       }
     }
   }
@@ -122,8 +125,12 @@ function parseRunTraceResponse(value: unknown): RunTraceResponse {
   }
 }
 
+function hasTraceApi() {
+  return Boolean(window.pywebview?.api?.runKnownModelTrace && window.pywebview.api.cancelTrace)
+}
+
 function waitForPywebviewReady() {
-  if (window.pywebview?.api?.runKnownModelTrace) return Promise.resolve()
+  if (hasTraceApi()) return Promise.resolve()
 
   return new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(() => {
@@ -133,23 +140,55 @@ function waitForPywebviewReady() {
 
     function onReady() {
       window.clearTimeout(timeout)
-      resolve()
+      if (hasTraceApi()) {
+        resolve()
+      } else {
+        reject(new Error('pywebview trace API is not available. Run the app through the desktop host.'))
+      }
     }
 
     window.addEventListener('pywebviewready', onReady, { once: true })
   })
 }
 
-export async function runKnownModelTrace() {
+export function createTraceRunId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID()
+  }
+
+  return `trace-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+export async function runKnownModelTrace(runId: string) {
   try {
     await waitForPywebviewReady()
-    const result = await window.pywebview?.api?.runKnownModelTrace?.()
+    const result = await window.pywebview?.api?.runKnownModelTrace?.(runId)
     return parseRunTraceResponse(result)
   } catch (error) {
     return {
       protocol_version: protocolVersion,
       type: 'error',
       run_id: null,
+      error: {
+        code: 'desktop_bridge_unavailable',
+        title: 'Desktop bridge unavailable',
+        message: error instanceof Error ? error.message : 'The desktop bridge could not be reached.',
+        stage: 'desktop_bridge',
+      },
+    } satisfies RunTraceResponse
+  }
+}
+
+export async function cancelTrace(runId: string) {
+  try {
+    await waitForPywebviewReady()
+    const result = await window.pywebview?.api?.cancelTrace?.(runId)
+    return parseRunTraceResponse(result)
+  } catch (error) {
+    return {
+      protocol_version: protocolVersion,
+      type: 'error',
+      run_id: runId,
       error: {
         code: 'desktop_bridge_unavailable',
         title: 'Desktop bridge unavailable',

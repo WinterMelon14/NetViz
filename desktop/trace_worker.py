@@ -4,36 +4,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-PROTOCOL_VERSION = 1
-
-
-def error_result(run_id: str, code: str, title: str, message: str, stage: str, exc: BaseException | None = None):
-    return {
-        "protocol_version": PROTOCOL_VERSION,
-        "type": "error",
-        "run_id": run_id,
-        "error": {
-            "code": code,
-            "title": title,
-            "message": message,
-            "stage": stage,
-            "details": {},
-            "traceback": "".join(traceback.format_exception(exc)) if exc else None,
-        },
-    }
-
-
-def success_result(run_id: str, payload: dict):
-    return {
-        "protocol_version": PROTOCOL_VERSION,
-        "type": "success",
-        "run_id": run_id,
-        "trace": {
-            "transfer": "inline",
-            "payload": payload,
-        },
-        "warnings": [],
-    }
+from desktop.trace_protocol import PROTOCOL_VERSION, trace_error, trace_success
 
 
 def load_request(path: str | None):
@@ -59,13 +30,13 @@ def run_trace(request_path: str | None = None):
     except Exception as exc:
         run_id = str(uuid.uuid4())
         print(traceback.format_exc(), file=sys.stderr)
-        return error_result(
+        return trace_error(
             run_id,
             "worker_protocol_error",
             "Trace worker could not read its request",
             str(exc),
             "worker_protocol",
-            exc,
+            exc=exc,
         )
 
     try:
@@ -75,16 +46,16 @@ def run_trace(request_path: str | None = None):
         model = TestModel()
         example_input = known_model_input()
         payload = model_summary(model, example_input)
-        return success_result(run_id, payload)
+        return trace_success(run_id, payload)
     except Exception as exc:
         print(traceback.format_exc(), file=sys.stderr)
-        return error_result(
+        return trace_error(
             run_id,
             "known_model_trace_failed",
             "Known model trace failed",
             str(exc),
             "worker_execution",
-            exc,
+            exc=exc,
         )
 
 

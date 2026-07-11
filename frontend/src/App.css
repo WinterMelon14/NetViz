@@ -83,6 +83,17 @@
   white-space: nowrap;
 }
 
+.toolbar-status {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: var(--card);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 button,
 select {
   border: 1px solid var(--button-border);
