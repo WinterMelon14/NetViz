@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import { buildLayout } from './buildLayout'
-import type { LayoutDirection } from './buildLayout'
 import { nodeHeight, whiteboardPadding } from './constants'
 import type { LayoutPositions } from './layoutStorage'
 import { nodeCardWidth } from './nodePresentation'
@@ -39,16 +38,14 @@ function graphStageBounds(
 
 export function useGraphModel({
   trace,
-  layoutDirection,
   layoutPositions,
   selectedNodeId,
 }: {
   trace: TracePayload | null
-  layoutDirection: LayoutDirection
   layoutPositions: LayoutPositions
   selectedNodeId: string | null
 }) {
-  const layout = useMemo(() => (trace ? buildLayout(trace.graph.nodes, trace.graph.edges, layoutDirection) : null), [layoutDirection, trace])
+  const layout = useMemo(() => (trace ? buildLayout(trace.graph.nodes, trace.graph.edges) : null), [trace])
   const layoutNodes = useMemo(() => {
     return (
       layout?.nodes.map((node) => ({

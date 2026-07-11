@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
-import type { LayoutDirection } from './graph/buildLayout'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -16,7 +15,6 @@ function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [layoutDirection, setLayoutDirection] = useState<LayoutDirection>('left-right')
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
@@ -44,7 +42,6 @@ function App() {
     stageBounds,
   } = useGraphModel({
     trace,
-    layoutDirection,
     layoutPositions,
     selectedNodeId,
   })
@@ -90,11 +87,6 @@ function App() {
     focusNode(nodeId)
   }
 
-  function toggleLayoutDirection() {
-    setLayoutDirection((current) => (current === 'left-right' ? 'top-bottom' : 'left-right'))
-    setLayoutPositions({})
-  }
-
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
   if (!trace || !layout) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
 
@@ -102,11 +94,9 @@ function App() {
     <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
       <Topbar
         modelName={trace.model_name}
-        layoutDirection={layoutDirection}
         theme={theme}
         onOpenLoader={() => setIsLoadModalOpen(true)}
         onFitGraph={fitView}
-        onToggleLayout={toggleLayoutDirection}
         onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
 
@@ -119,7 +109,6 @@ function App() {
         outputNodeIds={outputNodeIds}
         stageBounds={stageBounds}
         view={view}
-        layoutDirection={layoutDirection}
         selectedNodeId={selectedNodeId}
         onViewportPointerDown={onViewportPointerDown}
         onViewportPointerMove={onViewportPointerMove}

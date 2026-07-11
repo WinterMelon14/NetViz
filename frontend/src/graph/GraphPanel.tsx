@@ -1,5 +1,4 @@
 import type { PointerEvent, Ref } from 'react'
-import type { LayoutDirection } from './buildLayout'
 import { GraphEdgeLayer } from './GraphEdgeLayer'
 import { GraphNodeCard } from './GraphNodeCard'
 import type { GraphStageBounds, GraphView, PositionedTraceNode } from './types'
@@ -14,7 +13,6 @@ export function GraphPanel({
   outputNodeIds,
   stageBounds,
   view,
-  layoutDirection,
   selectedNodeId,
   onViewportPointerDown,
   onViewportPointerMove,
@@ -32,7 +30,6 @@ export function GraphPanel({
   outputNodeIds: Set<string>
   stageBounds: GraphStageBounds
   view: GraphView
-  layoutDirection: LayoutDirection
   selectedNodeId: string | null
   onViewportPointerDown: (event: PointerEvent<HTMLDivElement>) => void
   onViewportPointerMove: (event: PointerEvent<HTMLDivElement>) => void
@@ -58,7 +55,6 @@ export function GraphPanel({
               edges={edges}
               nodesById={nodesById}
               stageBounds={stageBounds}
-              layoutDirection={layoutDirection}
               selectedNodeId={selectedNodeId}
             />
 

@@ -4,7 +4,7 @@ export const nodeWidth = 244
 // Fixed card height used for vertical edge anchors, layout spacing, and centering.
 export const nodeHeight = 136
 
-// Distance between graph depth levels: columns in left-right mode, rows in top-bottom mode.
+// Horizontal distance between graph depth columns.
 export const columnGap = 128
 
 // Distance between sibling nodes within the same depth level.

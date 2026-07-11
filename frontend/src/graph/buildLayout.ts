@@ -1,8 +1,6 @@
 import type { TraceEdge, TraceNode } from '../trace/types'
 import { columnGap, nodeHeight, nodeWidth, padding, rowGap } from './constants'
 
-export type LayoutDirection = 'left-right' | 'top-bottom'
-
 export type LayoutResult = {
   nodes: (TraceNode & {
     depth: number
@@ -13,15 +11,14 @@ export type LayoutResult = {
   height: number
 }
 
-function maxColumnSpan(columns: Map<number, TraceNode[]>, direction: LayoutDirection) {
-  const primarySize = direction === 'left-right' ? nodeHeight : nodeWidth
+function maxColumnSpan(columns: Map<number, TraceNode[]>) {
   return Math.max(
-    primarySize,
-    ...Array.from(columns.values()).map((column) => column.length * primarySize + (column.length - 1) * rowGap),
+    nodeHeight,
+    ...Array.from(columns.values()).map((column) => column.length * nodeHeight + (column.length - 1) * rowGap),
   )
 }
 
-export function buildLayout(nodes: TraceNode[], edges: TraceEdge[], direction: LayoutDirection): LayoutResult {
+export function buildLayout(nodes: TraceNode[], edges: TraceEdge[]): LayoutResult {
   const nodeIds = new Set(nodes.map((node) => node.id))
   const inbound = new Map(nodes.map((node) => [node.id, 0]))
   const outgoing = new Map<string, string[]>()
@@ -52,36 +49,24 @@ export function buildLayout(nodes: TraceNode[], edges: TraceEdge[], direction: L
     columns.set(column, [...(columns.get(column) ?? []), node])
   })
 
-  const widestLevel = maxColumnSpan(columns, direction)
+  const widestLevel = maxColumnSpan(columns)
   const layoutNodes = nodes.map((node) => {
     const column = depth.get(node.id) ?? 0
     const columnNodes = columns.get(column) ?? []
     const row = columnNodes.findIndex((candidate) => candidate.id === node.id)
-    const levelSpan = columnNodes.length * (direction === 'left-right' ? nodeHeight : nodeWidth) + (columnNodes.length - 1) * rowGap
+    const levelSpan = columnNodes.length * nodeHeight + (columnNodes.length - 1) * rowGap
 
     return {
       ...node,
       depth: column,
-      x:
-        direction === 'left-right'
-          ? padding + column * (nodeWidth + columnGap)
-          : padding + Math.max(0, (widestLevel - levelSpan) / 2) + row * (nodeWidth + rowGap),
-      y:
-        direction === 'left-right'
-          ? padding + Math.max(0, (widestLevel - levelSpan) / 2) + row * (nodeHeight + rowGap)
-          : padding + column * (nodeHeight + columnGap),
+      x: padding + column * (nodeWidth + columnGap),
+      y: padding + Math.max(0, (widestLevel - levelSpan) / 2) + row * (nodeHeight + rowGap),
     }
   })
 
   return {
     nodes: layoutNodes,
-    width:
-      direction === 'left-right'
-        ? padding * 2 + (Math.max(...Array.from(columns.keys()), 0) + 1) * nodeWidth + Math.max(0, columns.size - 1) * columnGap
-        : padding * 2 + Math.max(nodeWidth, widestLevel),
-    height:
-      direction === 'left-right'
-        ? padding * 2 + widestLevel
-        : padding * 2 + (Math.max(...Array.from(columns.keys()), 0) + 1) * nodeHeight + Math.max(0, columns.size - 1) * columnGap,
+    width: padding * 2 + (Math.max(...Array.from(columns.keys()), 0) + 1) * nodeWidth + Math.max(0, columns.size - 1) * columnGap,
+    height: padding * 2 + widestLevel,
   }
 }

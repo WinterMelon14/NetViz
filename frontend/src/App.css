@@ -858,59 +858,6 @@ code {
   padding: 0;
 }
 
-.layout-icon {
-  position: relative;
-  display: block;
-  width: 18px;
-  height: 18px;
-  margin: 0 auto;
-}
-
-.layout-icon::before,
-.layout-icon::after {
-  content: '';
-  position: absolute;
-  border-radius: 999px;
-  background: var(--accent-hot);
-  box-shadow: 0 0 10px var(--accent-hot-glow);
-}
-
-.layout-icon--left-right::before {
-  left: 2px;
-  right: 2px;
-  top: 8px;
-  height: 2px;
-}
-
-.layout-icon--left-right::after {
-  left: 2px;
-  right: 2px;
-  top: 4px;
-  height: 10px;
-  border-left: 2px solid var(--accent-hot);
-  border-right: 2px solid var(--accent-hot);
-  background: transparent;
-  box-shadow: none;
-}
-
-.layout-icon--top-bottom::before {
-  top: 2px;
-  bottom: 2px;
-  left: 8px;
-  width: 2px;
-}
-
-.layout-icon--top-bottom::after {
-  top: 2px;
-  bottom: 2px;
-  left: 4px;
-  width: 10px;
-  border-top: 2px solid var(--accent-hot);
-  border-bottom: 2px solid var(--accent-hot);
-  background: transparent;
-  box-shadow: none;
-}
-
 .moon-icon {
   position: relative;
   display: block;
