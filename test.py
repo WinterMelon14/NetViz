@@ -510,9 +510,4 @@ class ComplicatedTrackModel(nn.Module):
 
         return self.final_merge(final_input)
 from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
-model = ComplicatedBranchyCNN()
-
-summary = model_summary(model, torch.randn(1, ))
-# Save output to frontend/public/branchy.json
-with open("frontend/public/branchy10.json", "w") as f:
-    json.dump(summary, f)
+model = ComplicatedBranchyCNN(d_model=4)

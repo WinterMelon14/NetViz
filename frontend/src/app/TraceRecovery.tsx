@@ -1,11 +1,11 @@
 export function TraceRecovery({
   message,
-  onRetry,
-  onOpenLoader,
+  onTraceModel,
+  onLoadFixture,
 }: {
   message: string
-  onRetry: () => void
-  onOpenLoader: () => void
+  onTraceModel: () => void
+  onLoadFixture?: () => void
 }) {
   return (
     <section className="trace-recovery" aria-label="Trace loading error">
@@ -13,8 +13,8 @@ export function TraceRecovery({
       <h2>Could not display the graph</h2>
       <p>{message}</p>
       <div>
-        <button type="button" onClick={onRetry}>Retry</button>
-        <button type="button" className="primary-button" onClick={onOpenLoader}>Load Trace</button>
+        {onLoadFixture ? <button type="button" onClick={onLoadFixture}>Load Trace Fixture</button> : null}
+        <button type="button" className="primary-button" onClick={onTraceModel}>Trace Model</button>
       </div>
     </section>
   )

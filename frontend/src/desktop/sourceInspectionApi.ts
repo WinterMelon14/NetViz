@@ -63,12 +63,6 @@ export type InspectModelSourceFailure = {
 
 export type InspectModelSourceResult = InspectModelSourceSuccess | InspectModelSourceFailure
 
-export type SourceInspectionState =
-  | { status: 'idle' }
-  | { status: 'inspecting' }
-  | { status: 'succeeded'; result: InspectModelSourceSuccess }
-  | { status: 'failed'; error: SourceInspectionError }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -180,46 +174,3 @@ export function parseInspectModelSourceResult(value: unknown): InspectModelSourc
   }
 }
 
-function hasSourceInspectionApi() {
-  return Boolean(window.pywebview?.api?.inspectModelSource)
-}
-
-function waitForPywebviewSourceInspection() {
-  if (hasSourceInspectionApi()) return Promise.resolve()
-
-  return new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener('pywebviewready', onReady)
-      reject(new Error('pywebview source inspection API is not available. Run the app through the desktop host.'))
-    }, 3000)
-
-    function onReady() {
-      window.clearTimeout(timeout)
-      if (hasSourceInspectionApi()) {
-        resolve()
-      } else {
-        reject(new Error('pywebview source inspection API is not available. Run the app through the desktop host.'))
-      }
-    }
-
-    window.addEventListener('pywebviewready', onReady, { once: true })
-  })
-}
-
-export async function inspectModelSource(sourceText: string): Promise<InspectModelSourceResult> {
-  try {
-    await waitForPywebviewSourceInspection()
-    const result = await window.pywebview?.api?.inspectModelSource?.({ sourceText })
-    return parseInspectModelSourceResult(result)
-  } catch (error) {
-    return {
-      ok: false,
-      error: {
-        code: 'source_inspection_failed',
-        title: 'Source inspection unavailable',
-        message: error instanceof Error ? error.message : 'The source inspection bridge could not be reached.',
-        stage: 'source_inspection',
-      },
-    }
-  }
-}

@@ -172,7 +172,7 @@ class UserTraceRuntimeTests(unittest.TestCase):
         crashed = manager.run_user_trace(self.bridge_request("crash-user"))
         self.assertEqual(crashed["error"]["code"], "worker_crashed")
 
-        recovered = manager.run_known_model_trace("after-user-crash")
+        recovered = manager.run_user_trace(self.fixture_bridge_request("valid_model.py", "after-user-crash"))
         self.assertEqual(recovered["type"], "success")
 
     def test_host_overwrites_untrusted_output_path(self):

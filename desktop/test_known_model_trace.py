@@ -1,4 +1,6 @@
 import unittest
+import hashlib
+from pathlib import Path
 import torch.fx as fx
 import torch
 from unittest.mock import patch
@@ -10,12 +12,27 @@ from util.Interpreter import SummaryInterpreter
 
 
 class KnownModelTraceTests(unittest.TestCase):
-    def test_real_desktop_worker_returns_known_model_trace(self):
-        result = TraceRunManager().run_known_model_trace("integration-known-model")
+    def test_real_desktop_worker_returns_user_model_trace(self):
+        model_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "user_models" / "valid_model.py"
+        result = TraceRunManager().run_user_trace({
+            "run_id": "integration-user-model",
+            "source": {
+                "file_path": str(model_path),
+                "class_name": "UserModel",
+                "content_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+            },
+            "constructor": {"args": [], "kwargs": {}},
+            "inputs": [{
+                "kind": "tensor",
+                "shape": [1, 4],
+                "dtype": "float32",
+                "generator": "random_normal",
+            }],
+        })
 
         self.assertEqual(result["type"], "success")
         self.assertEqual(result["trace"]["transfer"], "inline")
-        self.assertEqual(result["trace"]["payload"]["model_name"], "TestModel")
+        self.assertEqual(result["trace"]["payload"]["model_name"], "UserModel")
 
     def test_known_model_produces_labeled_connected_trace(self):
         payload = model_summary(TestModel(), known_model_input())

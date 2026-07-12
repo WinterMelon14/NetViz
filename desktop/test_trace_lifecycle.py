@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sys
 import tempfile
 import threading
@@ -7,10 +8,32 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from desktop.host import DesktopTraceApi, TraceRunManager
+from desktop.host import DesktopTraceApi, TraceRunManager as HostTraceRunManager
 from desktop.trace_protocol import MAX_DIAGNOSTIC_BYTES, MAX_PROTOCOL_OUTPUT_BYTES, PROTOCOL_VERSION
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
+
+
+class TraceRunManager(HostTraceRunManager):
+    """Routes lifecycle tests through the production user-trace entrypoint."""
+
+    def run_known_model_trace(self, run_id: str) -> dict[str, Any]:
+        model_path = FIXTURE_ROOT / "user_models" / "valid_model.py"
+        return self.run_user_trace({
+            "run_id": run_id,
+            "source": {
+                "file_path": str(model_path),
+                "class_name": "UserModel",
+                "content_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+            },
+            "constructor": {"args": [], "kwargs": {}},
+            "inputs": [{
+                "kind": "tensor",
+                "shape": [1, 4],
+                "dtype": "float32",
+                "generator": "random_normal",
+            }],
+        })
 
 
 def success_message(run_id: str) -> dict[str, Any]:
@@ -376,25 +399,6 @@ class TraceRunManagerTests(unittest.TestCase):
 
         self.assertEqual(result["error"]["code"], "worker_protocol_error")
         self.assertIn("multiple", result["error"]["title"].lower())
-
-    def test_source_inspection_bridge_accepts_valid_request(self):
-        api = DesktopTraceApi(manager=TraceRunManager(worker_command_factory=worker_command("")))
-
-        result = api.inspectModelSource({
-            "sourceText": "import torch\nclass Demo(torch.nn.Module):\n    def forward(self, x): return x\n"
-        })
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["candidates"][0]["className"], "Demo")
-
-    def test_source_inspection_bridge_rejects_invalid_request_shape(self):
-        api = DesktopTraceApi(manager=TraceRunManager(worker_command_factory=worker_command("")))
-
-        result = api.inspectModelSource({"sourceText": 123})
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"]["code"], "source_protocol_error")
-
 
 if __name__ == "__main__":
     unittest.main()

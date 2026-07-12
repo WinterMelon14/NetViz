@@ -1,5 +1,4 @@
 import json
-import hashlib
 import subprocess
 import sys
 import tempfile
@@ -8,9 +7,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from uuid import uuid4
-
-from desktop.source_inspection import inspect_model_source_request
 from desktop.selected_files import SelectedPythonFiles
 from desktop.trace_protocol import (
     MAX_DIAGNOSTIC_BYTES,
@@ -92,24 +88,6 @@ class TraceRunManager:
             return
         self._cancelled_run_ids.append(run_id)
         del self._cancelled_run_ids[:-MAX_REMEMBERED_CANCELLED_RUNS]
-
-    def run_known_model_trace(self, run_id: str | None = None) -> dict[str, Any]:
-        model_path = Path(__file__).with_name("known_model.py")
-        return self.run_user_trace({
-            "run_id": run_id or str(uuid4()),
-            "source": {
-                "file_path": str(model_path),
-                "class_name": "TestModel",
-                "content_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
-            },
-            "constructor": {"args": [], "kwargs": {}},
-            "inputs": [{
-                "kind": "tensor",
-                "shape": [1, 4],
-                "dtype": "float32",
-                "generator": "random_normal",
-            }],
-        })
 
     def run_user_trace(self, request: Any) -> dict[str, Any]:
         active_run_id = request.get("run_id") if isinstance(request, dict) else None
@@ -422,9 +400,6 @@ class DesktopTraceApi:
         self.manager = manager or TraceRunManager()
         self.selected_files = selected_files or SelectedPythonFiles()
 
-    def runKnownModelTrace(self, runId: str | None = None):
-        return self.manager.run_known_model_trace(runId)
-
     def runSelectedUserTrace(self, request: Any):
         resolved = self.selected_files.trace_request(request)
         if resolved.get("type") == "error":
@@ -442,10 +417,6 @@ class DesktopTraceApi:
 
     def consumeTraceFile(self, runId: str, path: str):
         return self.manager.consume_trace_file(runId, path)
-
-    def inspectModelSource(self, request: Any):
-        return inspect_model_source_request(request)
-
 
 def main():
     try:

@@ -1,15 +1,16 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
+import { EmptyTraceState } from './app/EmptyTraceState'
 import { TraceRecovery } from './app/TraceRecovery'
-import { cancelTrace, consumeTraceFile, createTraceRunId, runKnownModelTrace, runSelectedUserTrace, type RunTraceResponse, type TraceRunState } from './desktop/desktopTraceApi'
+import { getTraceViewState } from './app/traceViewState'
+import { cancelTrace, consumeTraceFile, createTraceRunId, runSelectedUserTrace, type RunTraceResponse, type TraceRunState } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
 import { useNodeDrag } from './graph/useNodeDrag'
 import { ModelSummary } from './inspector/ModelSummary'
 import { NodeInspector } from './inspector/NodeInspector'
-import { SourceInspectionPanel } from './sourceInspection/SourceInspectionPanel'
 import { TraceLoadDialog } from './trace/TraceLoadDialog'
 import { useTraceLoader } from './trace/useTraceLoader'
 import { UserTracePanel } from './userTrace/UserTracePanel'
@@ -24,12 +25,10 @@ function App() {
   const activeDesktopRunId = useRef<string | null>(null)
   const cancellingDesktopRunId = useRef<string | null>(null)
   const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
-  const [isSourceInspectionOpen, setIsSourceInspectionOpen] = useState(false)
   const [isUserTraceOpen, setIsUserTraceOpen] = useState(false)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
-    error,
     isLoadModalOpen,
     setIsLoadModalOpen,
     jsonText,
@@ -37,7 +36,6 @@ function App() {
     layoutPositions,
     setLayoutPositions,
     loadTracePayload,
-    retryDefaultTrace,
     onJsonTextChange,
     loadJsonFromFile,
     loadJsonFromText,
@@ -160,10 +158,6 @@ function App() {
       })
   }
 
-  function runDesktopTraceSpike() {
-    startDesktopTrace(runKnownModelTrace)
-  }
-
   function runSelectedModelTrace(request: UserTraceDraft) {
     startDesktopTrace(
       (runId) => runSelectedUserTrace({ ...request, run_id: runId }),
@@ -198,40 +192,73 @@ function App() {
     }
   }
 
-  const recoveryError = error ?? layoutError
-  if (recoveryError) return (
+  function clearDesktopTraceError() {
+    setDesktopTraceError(null)
+    setDesktopTraceState((current) => (
+      current === 'failed' || current === 'cancelled' || current === 'timed_out' ? 'idle' : current
+    ))
+  }
+
+  const openFixtureLoader = import.meta.env.DEV ? () => setIsLoadModalOpen(true) : undefined
+  const recoveryError = layoutError
+  const viewState = getTraceViewState({
+    hasTrace: Boolean(trace),
+    hasLayout: Boolean(layout),
+    isLayoutPending,
+    hasRecoveryError: Boolean(recoveryError),
+  })
+  const tracePanel = isUserTraceOpen ? (
+    <UserTracePanel
+      traceState={desktopTraceState}
+      traceError={desktopTraceError}
+      onRun={runSelectedModelTrace}
+      onCancel={cancelDesktopTrace}
+      onClearError={clearDesktopTraceError}
+      onClose={() => setIsUserTraceOpen(false)}
+    />
+  ) : null
+  const fixtureDialog = import.meta.env.DEV && isLoadModalOpen ? (
+    <TraceLoadDialog
+      jsonText={jsonText}
+      loadError={loadError}
+      onJsonTextChange={onJsonTextChange}
+      onFileSelected={loadJsonFromFile}
+      onLoadPastedJson={loadJsonFromText}
+      onClose={() => setIsLoadModalOpen(false)}
+    />
+  ) : null
+
+  if (viewState === 'recovery' && recoveryError) return (
     <main className={`app-shell ${theme} app-shell--recovery`}>
       <TraceRecovery
         message={recoveryError}
-        onRetry={retryDefaultTrace}
-        onOpenLoader={() => setIsLoadModalOpen(true)}
+        onTraceModel={() => setIsUserTraceOpen(true)}
+        onLoadFixture={openFixtureLoader}
       />
-      {isLoadModalOpen ? (
-        <TraceLoadDialog
-          jsonText={jsonText}
-          loadError={loadError}
-          onJsonTextChange={onJsonTextChange}
-          onFileSelected={loadJsonFromFile}
-          onLoadPastedJson={loadJsonFromText}
-          onClose={() => setIsLoadModalOpen(false)}
-        />
-      ) : null}
+      {fixtureDialog}
+      {tracePanel}
     </main>
   )
-  if (!trace || !layout || isLayoutPending) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
+  if (viewState === 'empty') return (
+    <EmptyTraceState onTraceModel={() => setIsUserTraceOpen(true)} onLoadFixture={openFixtureLoader}>
+      {fixtureDialog}
+      {tracePanel}
+    </EmptyTraceState>
+  )
+  if (viewState === 'layout' || !trace || !layout) return (
+    <>
+      <main className={`app-shell ${theme} app-shell--message`}>Preparing graph...</main>
+      {tracePanel}
+    </>
+  )
 
   return (
     <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
       <Topbar
         modelName={trace.model_name}
-        onOpenLoader={() => setIsLoadModalOpen(true)}
-        onOpenSourceInspection={() => setIsSourceInspectionOpen(true)}
         onOpenUserTrace={() => setIsUserTraceOpen(true)}
         onFitGraph={resetGraphPositions}
-        onRunDesktopTrace={runDesktopTraceSpike}
-        onCancelDesktopTrace={cancelDesktopTrace}
-        desktopTraceState={desktopTraceState}
-        desktopTraceError={desktopTraceError}
+        onLoadFixture={openFixtureLoader}
       />
 
       <GraphPanel
@@ -276,30 +303,8 @@ function App() {
         {isInspectorOpen ? '>' : '<'}
       </button>
 
-      {isLoadModalOpen ? (
-        <TraceLoadDialog
-          jsonText={jsonText}
-          loadError={loadError}
-          onJsonTextChange={onJsonTextChange}
-          onFileSelected={loadJsonFromFile}
-          onLoadPastedJson={loadJsonFromText}
-          onClose={() => setIsLoadModalOpen(false)}
-        />
-      ) : null}
-
-      {isSourceInspectionOpen ? (
-        <SourceInspectionPanel onClose={() => setIsSourceInspectionOpen(false)} />
-      ) : null}
-
-      {isUserTraceOpen ? (
-        <UserTracePanel
-          traceState={desktopTraceState}
-          traceError={desktopTraceError}
-          onRun={runSelectedModelTrace}
-          onCancel={cancelDesktopTrace}
-          onClose={() => setIsUserTraceOpen(false)}
-        />
-      ) : null}
+      {fixtureDialog}
+      {tracePanel}
     </main>
   )
 }

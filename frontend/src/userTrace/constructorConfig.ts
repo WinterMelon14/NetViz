@@ -54,17 +54,22 @@ export function buildConstructorConfig(
   const args: SerializableLiteral[] = []
   const kwargs: Record<string, SerializableLiteral> = {}
   const count = { value: 0 }
+  let hasOmittedPositionalParameter = false
   try {
     for (const parameter of parameters) {
       const field = fields[parameter.name]
       if (!field?.enabled) {
         if (parameter.required) return { ok: false, message: `${parameter.name} is required.` }
+        if (parameter.position !== 'keyword_only') hasOmittedPositionalParameter = true
         continue
       }
       if (!field.text.trim()) return { ok: false, message: `${parameter.name} needs a JSON literal value.` }
       const literal = validateLiteral(JSON.parse(field.text), parameter.name, 1, count)
-      if (parameter.position === 'positional_only') args.push(literal)
-      else kwargs[parameter.name] = literal
+      if (parameter.position === 'positional_only' || (parameter.position === 'positional_or_keyword' && !hasOmittedPositionalParameter)) {
+        args.push(literal)
+      } else {
+        kwargs[parameter.name] = literal
+      }
     }
     const serializedBytes = new TextEncoder().encode(JSON.stringify({ args, kwargs })).byteLength
     if (serializedBytes > MAX_CONSTRUCTOR_SERIALIZED_BYTES) {

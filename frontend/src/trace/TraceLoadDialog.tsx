@@ -31,8 +31,8 @@ export function TraceLoadDialog({
       <section className="load-modal" role="dialog" aria-modal="true" aria-labelledby="load-json-title">
         <header>
           <div>
-            <p className="eyebrow">Trace Loader</p>
-            <h2 id="load-json-title">Load JSON</h2>
+            <p className="eyebrow">Developer Tool</p>
+            <h2 id="load-json-title">Load Trace Fixture</h2>
           </div>
           <button type="button" className="icon-button" aria-label="Close loader" onClick={onClose}>x</button>
         </header>

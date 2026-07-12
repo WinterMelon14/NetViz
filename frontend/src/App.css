@@ -22,6 +22,54 @@
   color: var(--text-muted);
 }
 
+.empty-trace-shell {
+  width: 100vw;
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.empty-trace-header {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.empty-trace-header strong {
+  color: var(--text-strong);
+  font-size: 18px;
+}
+
+.empty-trace-state {
+  width: min(520px, calc(100% - 40px));
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+}
+
+.empty-trace-state h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 36px;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.empty-trace-state > p:not(.eyebrow) {
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
 .topbar {
   grid-column: 1 / -1;
   display: flex;
@@ -905,6 +953,7 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  color: var(--text);
 }
 
 .user-trace-modal > footer {

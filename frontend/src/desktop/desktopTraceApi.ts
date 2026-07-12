@@ -38,13 +38,11 @@ declare global {
   interface Window {
     pywebview?: {
       api?: {
-        runKnownModelTrace?: (runId: string) => Promise<unknown>
         runSelectedUserTrace?: (request: UserTraceBridgeRequest) => Promise<unknown>
         selectPythonFile?: () => Promise<unknown>
         inspectSelectedPythonFile?: (selectionId: string) => Promise<unknown>
         cancelTrace?: (runId: string) => Promise<unknown>
         consumeTraceFile?: (runId: string, path: string) => Promise<unknown>
-        inspectModelSource?: (request: { sourceText: string }) => Promise<unknown>
       }
     }
   }
@@ -159,7 +157,7 @@ export function parseRunTraceResponse(value: unknown): RunTraceResponse {
 
 function hasTraceApi() {
   return Boolean(
-    window.pywebview?.api?.runKnownModelTrace
+    window.pywebview?.api?.runSelectedUserTrace
     && window.pywebview.api.cancelTrace
     && window.pywebview.api.consumeTraceFile,
   )
@@ -193,26 +191,6 @@ export function createTraceRunId() {
   }
 
   return `trace-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-export async function runKnownModelTrace(runId: string) {
-  try {
-    await waitForPywebviewReady()
-    const result = await window.pywebview?.api?.runKnownModelTrace?.(runId)
-    return parseRunTraceResponse(result)
-  } catch (error) {
-    return {
-      protocol_version: protocolVersion,
-      type: 'error',
-      run_id: null,
-      error: {
-        code: 'desktop_bridge_unavailable',
-        title: 'Desktop bridge unavailable',
-        message: error instanceof Error ? error.message : 'The desktop bridge could not be reached.',
-        stage: 'desktop_bridge',
-      },
-    } satisfies RunTraceResponse
-  }
 }
 
 export async function runSelectedUserTrace(request: UserTraceBridgeRequest) {

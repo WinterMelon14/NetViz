@@ -9,7 +9,6 @@ const LAYOUT_PERSIST_DEBOUNCE_MS = 300
 
 export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void }) {
   const [trace, setTrace] = useState<TracePayload | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
   const [jsonText, setJsonText] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -20,7 +19,6 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     const payload = validateTracePayload(value)
     setTrace(payload)
     setLayoutPositions(loadStoredPositions(payload))
-    setError(null)
     setLoadError(null)
     onTraceApplied()
   }, [onTraceApplied])
@@ -29,27 +27,6 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     loadRequestRef.current += 1
     commitTracePayload(value)
   }, [commitTracePayload])
-
-  const loadDefaultTrace = useCallback(() => {
-    const requestId = ++loadRequestRef.current
-    fetch('/branchy.json')
-      .then((response) => {
-        if (!response.ok) throw new Error(`Unable to load trace JSON (${response.status})`)
-        return response.text()
-      })
-      .then((text) => {
-        if (loadRequestRef.current !== requestId) return
-        commitTracePayload(parseTraceJson(text))
-      })
-      .catch((loadError: unknown) => {
-        if (loadRequestRef.current !== requestId) return
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load the default trace.')
-      })
-  }, [commitTracePayload])
-
-  useEffect(() => {
-    loadDefaultTrace()
-  }, [loadDefaultTrace])
 
   useEffect(() => {
     if (!trace) return
@@ -87,7 +64,6 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
 
   return {
     trace,
-    error,
     isLoadModalOpen,
     setIsLoadModalOpen,
     jsonText,
@@ -95,7 +71,6 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     layoutPositions,
     setLayoutPositions,
     loadTracePayload: applyTracePayload,
-    retryDefaultTrace: loadDefaultTrace,
     onJsonTextChange,
     loadJsonFromFile,
     loadJsonFromText,

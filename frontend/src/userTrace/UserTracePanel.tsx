@@ -37,12 +37,14 @@ export function UserTracePanel({
   traceError,
   onRun,
   onCancel,
+  onClearError,
   onClose,
 }: {
   traceState: TraceRunState
   traceError: string | null
   onRun: (request: UserTraceDraft) => void
   onCancel: () => void
+  onClearError: () => void
   onClose: () => void
 }) {
   const [selectedFile, setSelectedFile] = useState<SelectedPythonFile | null>(null)
@@ -87,6 +89,7 @@ export function UserTracePanel({
 
   async function inspectFile(file: SelectedPythonFile) {
     const requestId = ++requestIdRef.current
+    onClearError()
     setSelectedClass(null)
     setConstructorFields({})
     setTrustedCodeConfirmed(false)
