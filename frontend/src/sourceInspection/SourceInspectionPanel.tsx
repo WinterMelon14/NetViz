@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   inspectModelSource,
   type FunctionParameter,
@@ -89,18 +89,40 @@ function CandidateList({ result }: { result: InspectModelSourceSuccess }) {
 export function SourceInspectionPanel({ onClose }: { onClose: () => void }) {
   const [sourceText, setSourceText] = useState('')
   const [inspectionState, setInspectionState] = useState<SourceInspectionState>({ status: 'idle' })
+  const requestIdRef = useRef(0)
+  const mountedRef = useRef(true)
   const isInspecting = inspectionState.status === 'inspecting'
+
+  useEffect(() => () => {
+    mountedRef.current = false
+    requestIdRef.current += 1
+  }, [])
 
   function runInspection() {
     if (isInspecting) return
+    const requestId = ++requestIdRef.current
     setInspectionState({ status: 'inspecting' })
-    inspectModelSource(sourceText).then((result) => {
-      if (result.ok) {
-        setInspectionState({ status: 'succeeded', result })
-      } else {
-        setInspectionState({ status: 'failed', error: result.error })
-      }
-    })
+    inspectModelSource(sourceText)
+      .then((result) => {
+        if (!mountedRef.current || requestIdRef.current !== requestId) return
+        if (result.ok) {
+          setInspectionState({ status: 'succeeded', result })
+        } else {
+          setInspectionState({ status: 'failed', error: result.error })
+        }
+      })
+      .catch((error: unknown) => {
+        if (!mountedRef.current || requestIdRef.current !== requestId) return
+        setInspectionState({
+          status: 'failed',
+          error: {
+            code: 'source_inspection_failed',
+            title: 'Source inspection failed',
+            message: error instanceof Error ? error.message : 'The source inspection request failed unexpectedly.',
+            stage: 'source_inspection_bridge',
+          },
+        })
+      })
   }
 
   return (

@@ -5,6 +5,8 @@ import { maxScale, minScale, nodeHeight } from './constants'
 import { nodeCardWidth } from './nodePresentation'
 import type { GraphView, PositionedTraceNode } from './types'
 
+const fitPadding = 36
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
@@ -27,15 +29,19 @@ export function useGraphViewport({
   const fitView = useCallback(() => {
     if (!layout || !viewportRef.current) return
     const bounds = viewportRef.current.getBoundingClientRect()
-    const inputNode = layout.nodes.find((node) => node.kind === 'input') ?? layout.nodes[0]
-    const scale = minScale
-
-    if (!inputNode) return
+    if (!layout.nodes.length || bounds.width <= 0 || bounds.height <= 0) return
+    const availableWidth = Math.max(1, bounds.width - fitPadding * 2)
+    const availableHeight = Math.max(1, bounds.height - fitPadding * 2)
+    const scale = Math.min(
+      maxScale,
+      availableWidth / layout.width,
+      availableHeight / layout.height,
+    )
 
     setView({
       scale,
-      x: 36 - inputNode.x * scale,
-      y: bounds.height / 2 - (inputNode.y + nodeHeight / 2) * scale,
+      x: (bounds.width - layout.width * scale) / 2,
+      y: (bounds.height - layout.height * scale) / 2,
     })
   }, [layout])
 
@@ -98,20 +104,21 @@ export function useGraphViewport({
       event.preventDefault()
       const rect = currentViewport.getBoundingClientRect()
       const zoomFactor = Math.exp(-event.deltaY * 0.0035)
-      const nextScale = clamp(view.scale * zoomFactor, minScale, maxScale)
-      const graphX = (event.clientX - rect.left - view.x) / view.scale
-      const graphY = (event.clientY - rect.top - view.y) / view.scale
-
-      setView({
-        scale: nextScale,
-        x: event.clientX - rect.left - graphX * nextScale,
-        y: event.clientY - rect.top - graphY * nextScale,
+      setView((current) => {
+        const nextScale = clamp(current.scale * zoomFactor, Math.min(minScale, current.scale), maxScale)
+        const graphX = (event.clientX - rect.left - current.x) / current.scale
+        const graphY = (event.clientY - rect.top - current.y) / current.scale
+        return {
+          scale: nextScale,
+          x: event.clientX - rect.left - graphX * nextScale,
+          y: event.clientY - rect.top - graphY * nextScale,
+        }
       })
     }
 
     currentViewport.addEventListener('wheel', onWheel, { passive: false })
     return () => currentViewport.removeEventListener('wheel', onWheel)
-  }, [view.scale, view.x, view.y])
+  }, [layout])
 
   useEffect(() => () => {
     if (panFrameRef.current !== null) window.cancelAnimationFrame(panFrameRef.current)

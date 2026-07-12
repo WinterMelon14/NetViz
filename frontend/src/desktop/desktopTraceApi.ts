@@ -1,5 +1,5 @@
-import type { TracePayload } from '../trace/types'
-import { validateTracePayload } from '../trace/validateTracePayload'
+import type { TracePayload } from '../trace/types.ts'
+import { validateTracePayload } from '../trace/validateTracePayload.ts'
 
 const protocolVersion = 1
 
@@ -70,7 +70,7 @@ function normalizeError(value: unknown): TraceWorkerError {
   }
 }
 
-function parseRunTraceResponse(value: unknown): RunTraceResponse {
+export function parseRunTraceResponse(value: unknown): RunTraceResponse {
   if (!isRecord(value) || value.protocol_version !== protocolVersion) {
     return {
       protocol_version: protocolVersion,

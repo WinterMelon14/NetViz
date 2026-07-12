@@ -1,6 +1,8 @@
 import type { TracePayload } from '../trace/types'
 
 const layoutStorageVersion = 'elk-v1'
+const layoutStoragePrefix = 'trace-layout:'
+export const MAX_SAVED_LAYOUTS = 10
 
 export type NodePosition = {
   x: number
@@ -26,12 +28,58 @@ function hashTrace(payload: TracePayload) {
 }
 
 function layoutStorageKey(payload: TracePayload) {
-  return `trace-layout:${hashTrace(payload)}`
+  return `${layoutStoragePrefix}${hashTrace(payload)}`
 }
 
 function warnMalformedStoredLayout(error?: unknown) {
-  if (!import.meta.env.DEV) return
+  if (!import.meta.env?.DEV) return
   console.warn('Discarding malformed saved graph layout positions.', error)
+}
+
+function warnLayoutStorageFailure(error: unknown) {
+  if (!import.meta.env?.DEV) return
+  console.warn('Graph layout positions could not be persisted.', error)
+}
+
+function safeRemoveItem(key: string) {
+  try {
+    window.localStorage.removeItem(key)
+  } catch (error) {
+    warnLayoutStorageFailure(error)
+  }
+}
+
+function savedLayoutEntries() {
+  const entries: { key: string; updatedAt: number }[] = []
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index)
+    if (!key?.startsWith(layoutStoragePrefix)) continue
+    let updatedAt = 0
+    const stored = window.localStorage.getItem(key)
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as { updated_at?: unknown }
+        if (typeof parsed.updated_at === 'number' && Number.isFinite(parsed.updated_at)) {
+          updatedAt = parsed.updated_at
+        }
+      } catch {
+        // Malformed entries remain load-compatible and are treated as oldest.
+      }
+    }
+    entries.push({ key, updatedAt })
+  }
+  return entries
+}
+
+function pruneSavedLayouts(maxEntries: number, preservedKey?: string) {
+  try {
+    const entries = savedLayoutEntries()
+      .filter((entry) => entry.key !== preservedKey)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+    entries.slice(maxEntries).forEach((entry) => safeRemoveItem(entry.key))
+  } catch (error) {
+    warnLayoutStorageFailure(error)
+  }
 }
 
 function isNodePosition(value: unknown): value is NodePosition {
@@ -61,7 +109,7 @@ export function loadStoredPositions(payload: TracePayload): LayoutPositions {
 
     if (isLayoutPositions(savedPositions)) return savedPositions
 
-    window.localStorage.removeItem(key)
+    safeRemoveItem(key)
     warnMalformedStoredLayout()
     return {}
   } catch (error) {
@@ -78,9 +126,18 @@ export function loadStoredPositions(payload: TracePayload): LayoutPositions {
 export function saveStoredPositions(payload: TracePayload, positions: LayoutPositions) {
   const key = layoutStorageKey(payload)
   if (!Object.keys(positions).length) {
-    window.localStorage.removeItem(key)
+    safeRemoveItem(key)
     return
   }
 
-  window.localStorage.setItem(key, JSON.stringify({ layout: { positions } }))
+  try {
+    pruneSavedLayouts(MAX_SAVED_LAYOUTS - 1, key)
+    window.localStorage.setItem(key, JSON.stringify({
+      updated_at: Date.now(),
+      layout: { positions },
+    }))
+    pruneSavedLayouts(MAX_SAVED_LAYOUTS)
+  } catch (error) {
+    warnLayoutStorageFailure(error)
+  }
 }

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadStoredPositions, saveStoredPositions } from '../graph/layoutStorage'
 import type { LayoutPositions } from '../graph/layoutStorage'
 import { parseTraceJson } from './parseTraceJson'
 import type { TracePayload } from './types'
 import { validateTracePayload } from './validateTracePayload'
 
-const LAYOUT_PERSIST_DEBOUNCE_MS = 250
+const LAYOUT_PERSIST_DEBOUNCE_MS = 300
 
 export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void }) {
   const [trace, setTrace] = useState<TracePayload | null>(null)
@@ -14,8 +14,9 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
   const [jsonText, setJsonText] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [layoutPositions, setLayoutPositions] = useState<LayoutPositions>({})
+  const loadRequestRef = useRef(0)
 
-  const applyTracePayload = useCallback((value: unknown) => {
+  const commitTracePayload = useCallback((value: unknown) => {
     const payload = validateTracePayload(value)
     setTrace(payload)
     setLayoutPositions(loadStoredPositions(payload))
@@ -24,17 +25,31 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     onTraceApplied()
   }, [onTraceApplied])
 
-  useEffect(() => {
+  const applyTracePayload = useCallback((value: unknown) => {
+    loadRequestRef.current += 1
+    commitTracePayload(value)
+  }, [commitTracePayload])
+
+  const loadDefaultTrace = useCallback(() => {
+    const requestId = ++loadRequestRef.current
     fetch('/branchy.json')
       .then((response) => {
         if (!response.ok) throw new Error(`Unable to load trace JSON (${response.status})`)
         return response.text()
       })
       .then((text) => {
-        applyTracePayload(parseTraceJson(text))
+        if (loadRequestRef.current !== requestId) return
+        commitTracePayload(parseTraceJson(text))
       })
-      .catch((loadError: Error) => setError(loadError.message))
-  }, [applyTracePayload])
+      .catch((loadError: unknown) => {
+        if (loadRequestRef.current !== requestId) return
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load the default trace.')
+      })
+  }, [commitTracePayload])
+
+  useEffect(() => {
+    loadDefaultTrace()
+  }, [loadDefaultTrace])
 
   useEffect(() => {
     if (!trace) return
@@ -80,6 +95,7 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     layoutPositions,
     setLayoutPositions,
     loadTracePayload: applyTracePayload,
+    retryDefaultTrace: loadDefaultTrace,
     onJsonTextChange,
     loadJsonFromFile,
     loadJsonFromText,

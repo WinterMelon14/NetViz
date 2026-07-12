@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
+import { TraceRecovery } from './app/TraceRecovery'
 import { cancelTrace, consumeTraceFile, createTraceRunId, runKnownModelTrace, type TraceRunState } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
@@ -33,6 +34,7 @@ function App() {
     layoutPositions,
     setLayoutPositions,
     loadTracePayload,
+    retryDefaultTrace,
     onJsonTextChange,
     loadJsonFromFile,
     loadJsonFromText,
@@ -178,8 +180,26 @@ function App() {
     }
   }
 
-  if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>
-  if (layoutError) return <main className={`app-shell ${theme} app-shell--message`}>{layoutError}</main>
+  const recoveryError = error ?? layoutError
+  if (recoveryError) return (
+    <main className={`app-shell ${theme} app-shell--recovery`}>
+      <TraceRecovery
+        message={recoveryError}
+        onRetry={retryDefaultTrace}
+        onOpenLoader={() => setIsLoadModalOpen(true)}
+      />
+      {isLoadModalOpen ? (
+        <TraceLoadDialog
+          jsonText={jsonText}
+          loadError={loadError}
+          onJsonTextChange={onJsonTextChange}
+          onFileSelected={loadJsonFromFile}
+          onLoadPastedJson={loadJsonFromText}
+          onClose={() => setIsLoadModalOpen(false)}
+        />
+      ) : null}
+    </main>
+  )
   if (!trace || !layout || isLayoutPending) return <main className={`app-shell ${theme} app-shell--message`}>Loading trace...</main>
 
   return (

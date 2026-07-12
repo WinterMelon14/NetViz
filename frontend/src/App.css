@@ -72,6 +72,33 @@
   display: none;
 }
 
+.app-shell--recovery {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  place-items: center;
+  padding: 32px;
+}
+
+.trace-recovery {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.trace-recovery > p:not(.eyebrow) {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.trace-recovery > div {
+  display: flex;
+  gap: 8px;
+}
+
 .toolbar-error {
   max-width: 260px;
   color: var(--danger);
