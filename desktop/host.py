@@ -1,4 +1,5 @@
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ from desktop.trace_protocol import (
     trace_error,
     validate_worker_result,
 )
+from desktop.user_trace_constants import CANCEL_TERMINATION_TIMEOUT_SECONDS, MAX_REMEMBERED_CANCELLED_RUNS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEV_SERVER_URL = "http://localhost:5173/"
@@ -64,10 +66,10 @@ def terminate_process(process: subprocess.Popen[str]) -> None:
 
     process.terminate()
     try:
-        process.wait(timeout=2)
+        process.wait(timeout=CANCEL_TERMINATION_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait(timeout=2)
+        process.wait(timeout=CANCEL_TERMINATION_TIMEOUT_SECONDS)
 
 
 class TraceRunManager:
@@ -83,13 +85,22 @@ class TraceRunManager:
         self._lock = threading.Lock()
         self._active_runs: dict[str, ActiveTraceRun] = {}
         self._completed_trace_files: dict[str, CompletedTraceFile] = {}
+        self._cancelled_run_ids: list[str] = []
+
+    def _remember_cancelled(self, run_id: str) -> None:
+        if run_id in self._cancelled_run_ids:
+            return
+        self._cancelled_run_ids.append(run_id)
+        del self._cancelled_run_ids[:-MAX_REMEMBERED_CANCELLED_RUNS]
 
     def run_known_model_trace(self, run_id: str | None = None) -> dict[str, Any]:
+        model_path = Path(__file__).with_name("known_model.py")
         return self.run_user_trace({
             "run_id": run_id or str(uuid4()),
             "source": {
-                "file_path": str(Path(__file__).with_name("known_model.py")),
+                "file_path": str(model_path),
                 "class_name": "TestModel",
+                "content_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
             },
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [{
@@ -198,6 +209,8 @@ class TraceRunManager:
             with self._lock:
                 removed_run = self._active_runs.pop(active_run_id, None)
             cancelled = bool(removed_run and removed_run.cancel_requested)
+            if cancelled:
+                self._remember_cancelled(active_run_id)
 
         stdout, stdout_exceeded = read_bounded_text(protocol_path, MAX_PROTOCOL_OUTPUT_BYTES)
         stderr, stderr_exceeded = read_bounded_text(diagnostic_path, MAX_DIAGNOSTIC_BYTES)
@@ -336,6 +349,14 @@ class TraceRunManager:
         with self._lock:
             active_run = self._active_runs.get(run_id)
             if not active_run:
+                if run_id in self._cancelled_run_ids:
+                    return trace_error(
+                        run_id,
+                        "cancelled",
+                        "Trace cancelled",
+                        "The trace worker was already cancelled.",
+                        "worker_cancelled",
+                    )
                 return trace_error(
                     run_id,
                     "run_not_found",
@@ -344,6 +365,7 @@ class TraceRunManager:
                     "host_lifecycle",
                 )
             active_run.cancel_requested = True
+            self._remember_cancelled(run_id)
             process = active_run.process
 
         if process is not None:

@@ -1,4 +1,4 @@
-export type SerializableLiteral = null | boolean | number | string | SerializableLiteral[]
+export type SerializableLiteral = null | boolean | number | string | SerializableLiteral[] | { [key: string]: SerializableLiteral }
 
 export type FunctionParameter = {
   name: string
@@ -53,6 +53,7 @@ export type InspectModelSourceSuccess = {
   ok: true
   candidates: ModelCandidate[]
   warnings: SourceInspectionWarning[]
+  sourceIdentity?: { contentSha256: string; sizeBytes: number }
 }
 
 export type InspectModelSourceFailure = {
@@ -165,6 +166,11 @@ export function parseInspectModelSourceResult(value: unknown): InspectModelSourc
       ok: true,
       candidates: Array.isArray(value.candidates) ? value.candidates.filter(isCandidate).map(normalizeCandidate) : [],
       warnings,
+      sourceIdentity: isRecord(value.sourceIdentity)
+        && typeof value.sourceIdentity.contentSha256 === 'string'
+        && typeof value.sourceIdentity.sizeBytes === 'number'
+        ? { contentSha256: value.sourceIdentity.contentSha256, sizeBytes: value.sourceIdentity.sizeBytes }
+        : undefined,
     }
   }
 

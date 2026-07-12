@@ -72,9 +72,14 @@ class SelectedPythonFilesTests(unittest.TestCase):
     def test_trace_request_resolves_only_registered_handle(self):
         files = SelectedPythonFiles(picker=lambda: str(self.source))
         descriptor = files.select()["selected"]
+        inspection = files.inspect(descriptor["selectionId"])
         request = {
             "run_id": "selected-run",
-            "source": {"selection_id": descriptor["selectionId"], "class_name": "Model"},
+            "source": {
+                "selection_id": descriptor["selectionId"],
+                "class_name": "Model",
+                "content_sha256": inspection["sourceIdentity"]["contentSha256"],
+            },
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [],
         }
@@ -83,6 +88,31 @@ class SelectedPythonFilesTests(unittest.TestCase):
         request["source"]["selection_id"] = str(self.source)
         rejected = files.trace_request(request)
         self.assertEqual(rejected["error"]["code"], "selected_file_unavailable")
+
+    def test_changed_source_requires_reinspection(self):
+        files = SelectedPythonFiles(picker=lambda: str(self.source))
+        descriptor = files.select()["selected"]
+        inspection = files.inspect(descriptor["selectionId"])
+        self.source.write_text("class Different: pass\n", encoding="utf-8")
+        result = files.trace_request({
+            "run_id": "changed-source",
+            "source": {
+                "selection_id": descriptor["selectionId"],
+                "class_name": "Model",
+                "content_sha256": inspection["sourceIdentity"]["contentSha256"],
+            },
+            "constructor": {"args": [], "kwargs": {}},
+            "inputs": [],
+        })
+        self.assertEqual(result["error"]["code"], "source_changed")
+
+    def test_missing_selected_file_is_reported_clearly(self):
+        files = SelectedPythonFiles(picker=lambda: str(self.source))
+        descriptor = files.select()["selected"]
+        self.source.unlink()
+        result = files.inspect(descriptor["selectionId"])
+        self.assertEqual(result["error"]["code"], "source_inspection_failed")
+        self.assertIn("no longer exists", result["error"]["message"])
 
 
 if __name__ == "__main__":

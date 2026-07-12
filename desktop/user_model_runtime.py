@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import inspect
 from pathlib import Path
 from types import ModuleType
@@ -23,16 +24,36 @@ class UserTraceRuntimeError(RuntimeError):
         self.details = details or {}
 
 
-def load_user_module(file_path: str, run_id: str) -> ModuleType:
+def load_user_module(file_path: str, run_id: str, expected_sha256: str) -> ModuleType:
     path = Path(file_path)
     module_name = f"tensor_trace_user_{run_id.replace('-', '_')}_{uuid4().hex}"
     try:
+        actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise UserTraceRuntimeError(
+                "source_changed",
+                "Model source changed",
+                "The Python file differs from the inspected version. Inspect it again before tracing.",
+                "source_identity",
+                {"expected_sha256": expected_sha256, "actual_sha256": actual_sha256},
+            )
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
             raise ImportError("Python could not create a module specification for this file.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        final_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        if final_sha256 != expected_sha256:
+            raise UserTraceRuntimeError(
+                "source_changed",
+                "Model source changed",
+                "The Python file changed while it was being imported. Inspect it again before tracing.",
+                "source_identity",
+                {"expected_sha256": expected_sha256, "actual_sha256": final_sha256},
+            )
         return module
+    except UserTraceRuntimeError:
+        raise
     except BaseException as exc:
         raise UserTraceRuntimeError(
             "module_import_failed",
@@ -43,7 +64,7 @@ def load_user_module(file_path: str, run_id: str) -> ModuleType:
         ) from exc
 
 
-def instantiate_model(module: ModuleType, class_name: str):
+def instantiate_model(module: ModuleType, class_name: str, args: list[Any], kwargs: dict[str, Any]):
     import torch
 
     if not hasattr(module, class_name):
@@ -64,7 +85,7 @@ def instantiate_model(module: ModuleType, class_name: str):
             {"class_name": class_name},
         )
     try:
-        model = selected()
+        model = selected(*args, **kwargs)
     except BaseException as exc:
         raise UserTraceRuntimeError(
             "model_construction_failed",

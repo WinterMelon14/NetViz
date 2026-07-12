@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import json
 import tempfile
 import unittest
@@ -27,7 +28,11 @@ class UserTraceRequestTests(unittest.TestCase):
         return {
             "protocol_version": 1,
             "run_id": "request-test",
-            "source": {"file_path": str(self.source_path), "class_name": "Model"},
+            "source": {
+                "file_path": str(self.source_path),
+                "class_name": "Model",
+                "content_sha256": hashlib.sha256(self.source_path.read_bytes()).hexdigest(),
+            },
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [{
                 "kind": "tensor",
@@ -69,13 +74,25 @@ class UserTraceRequestTests(unittest.TestCase):
         request["source"]["class_name"] = "Model()"
         self.assert_invalid(request, "source.class_name")
 
-    def test_rejects_constructor_values_until_future_ticket(self):
+    def test_accepts_json_safe_constructor_values(self):
         request = self.request()
-        request["constructor"]["args"] = [1]
-        self.assert_invalid(request, "constructor.args")
+        request["constructor"] = {
+            "args": [None, True, 3, 1.5, "name", [1, 2]],
+            "kwargs": {"config": {"enabled": False}},
+        }
+        result = validate_user_trace_request(request, expected_output_path=self.output_path)
+        self.assertEqual(result["constructor"], request["constructor"])
+
+    def test_rejects_non_json_constructor_values_and_excessive_depth(self):
         request = self.request()
-        request["constructor"]["kwargs"] = {"size": 4}
-        self.assert_invalid(request, "constructor.kwargs")
+        request["constructor"]["args"] = [{"bad": {1, 2}}]
+        self.assert_invalid(request, "constructor.args[0].bad")
+        request = self.request()
+        nested = None
+        for _ in range(9):
+            nested = [nested]
+        request["constructor"]["args"] = [nested]
+        self.assert_invalid(request, "constructor.args[0][0][0][0][0][0][0][0][0]")
 
     def test_rejects_input_count_dimensions_dtype_and_generator(self):
         request = self.request()

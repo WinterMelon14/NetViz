@@ -1,13 +1,21 @@
+import hashlib
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-from desktop.source_inspection import MAX_SOURCE_CHARS, inspect_model_source, inspection_error
+from desktop.source_inspection import inspect_model_source, inspection_error
 from desktop.trace_protocol import trace_error
+from desktop.user_trace_constants import MAX_SOURCE_FILE_BYTES
 
-MAX_SOURCE_FILE_BYTES = MAX_SOURCE_CHARS
 PythonFilePicker = Callable[[], str | None]
+
+
+@dataclass(frozen=True)
+class InspectedSource:
+    content_sha256: str
+    size_bytes: int
 
 
 def native_python_file_picker() -> str | None:
@@ -27,6 +35,7 @@ class SelectedPythonFiles:
     def __init__(self, picker: PythonFilePicker = native_python_file_picker):
         self._picker = picker
         self._paths: dict[str, Path] = {}
+        self._inspected: dict[str, InspectedSource] = {}
 
     def select(self) -> dict[str, Any]:
         try:
@@ -72,14 +81,26 @@ class SelectedPythonFiles:
                     f"Source inspection is limited to {MAX_SOURCE_FILE_BYTES} bytes.",
                     {"maxBytes": MAX_SOURCE_FILE_BYTES, "actualBytes": size_bytes},
                 )
-            source_text = path.read_text(encoding="utf-8")
+            source_bytes = path.read_bytes()
+            source_text = source_bytes.decode("utf-8")
         except (OSError, UnicodeError, ValueError) as exc:
             return inspection_error(
                 "source_inspection_failed",
                 "Source file could not be read",
                 str(exc),
             )
-        return inspect_model_source(source_text)
+        result = inspect_model_source(source_text)
+        if result.get("ok") is True:
+            identity = InspectedSource(hashlib.sha256(source_bytes).hexdigest(), len(source_bytes))
+            self._inspected[selection_id] = identity
+            result = dict(result)
+            result["sourceIdentity"] = {
+                "contentSha256": identity.content_sha256,
+                "sizeBytes": identity.size_bytes,
+            }
+        else:
+            self._inspected.pop(selection_id, None)
+        return result
 
     def trace_request(self, request: Any) -> dict[str, Any] | dict[str, object]:
         if not isinstance(request, dict):
@@ -109,11 +130,41 @@ class SelectedPythonFiles:
                 str(exc),
                 "host_selection",
             )
+        identity = self._inspected.get(source.get("selection_id"))
+        requested_sha256 = source.get("content_sha256")
+        if identity is None or requested_sha256 != identity.content_sha256:
+            return trace_error(
+                request.get("run_id"),
+                "source_reinspection_required",
+                "Model source must be inspected again",
+                "The trace request does not match the latest inspected file contents.",
+                "host_selection",
+            )
+        try:
+            actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            return trace_error(
+                request.get("run_id"),
+                "selected_file_unavailable",
+                "Selected Python file is unavailable",
+                str(exc),
+                "host_selection",
+            )
+        if actual_sha256 != identity.content_sha256:
+            self._inspected.pop(source.get("selection_id"), None)
+            return trace_error(
+                request.get("run_id"),
+                "source_changed",
+                "Model source changed",
+                "The Python file differs from the inspected version. Inspect it again before tracing.",
+                "host_selection",
+            )
 
         resolved = dict(request)
         resolved["source"] = {
             "file_path": str(path),
             "class_name": source.get("class_name"),
+            "content_sha256": identity.content_sha256,
         }
         return resolved
 

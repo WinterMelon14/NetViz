@@ -144,6 +144,7 @@ class TraceRunManagerTests(unittest.TestCase):
 
         self.assertEqual(cancel_result["error"]["code"], "cancelled")
         self.assertEqual(thread_result["error"]["code"], "cancelled")
+        self.assertEqual(manager.cancel_trace("run-cancel")["error"]["code"], "cancelled")
 
     def test_duplicate_run_request_is_rejected(self):
         manager = TraceRunManager(worker_command_factory=worker_command("import time; time.sleep(10)"))
@@ -300,6 +301,36 @@ class TraceRunManagerTests(unittest.TestCase):
             self.assertEqual(consumed["payload"]["model_name"], "LargeModel")
             self.assertEqual(consumed_again["error"]["code"], "trace_file_unavailable")
             self.assertEqual(list(Path(temp_root).iterdir()), [])
+
+    def test_cancellation_during_file_backed_result_handling_cleans_up_and_recovers(self):
+        code = (
+            "import json, pathlib, sys, time; "
+            "request=json.load(open(sys.argv[1], encoding='utf-8')); "
+            "path=pathlib.Path(request['output_path']); "
+            "path.write_text(json.dumps({'model_name':'Pending','graph':{'nodes':[],'edges':[]}}), encoding='utf-8'); "
+            "path.with_name('ready').write_text('ready', encoding='utf-8'); "
+            "time.sleep(60)"
+        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            manager = TraceRunManager(worker_command_factory=worker_command(code), temp_root=Path(temp_root))
+            result: dict[str, Any] = {}
+            thread = threading.Thread(target=lambda: result.update(manager.run_known_model_trace("cancel-file")))
+            thread.start()
+            deadline = time.time() + 3
+            while time.time() < deadline and not list(Path(temp_root).rglob("ready")):
+                time.sleep(0.01)
+            self.assertTrue(list(Path(temp_root).rglob("ready")))
+            manager.cancel_trace("cancel-file")
+            thread.join(timeout=3)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(result["error"]["code"], "cancelled")
+            self.assertEqual(list(Path(temp_root).iterdir()), [])
+
+            manager.worker_command_factory = worker_command(
+                "import json, sys; request=json.load(open(sys.argv[1], encoding='utf-8')); "
+                f"print(json.dumps({success_message('RUN_ID')!r} | {{'run_id': request['run_id']}}))"
+            )
+            self.assertEqual(manager.run_known_model_trace("after-cancel-file")["type"], "success")
 
     def test_protocol_output_is_bounded(self):
         code = f"print('x' * {MAX_PROTOCOL_OUTPUT_BYTES + 1})"

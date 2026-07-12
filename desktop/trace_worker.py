@@ -89,8 +89,17 @@ def run_trace(request_path: str | None = None):
         )
 
     try:
-        module = load_user_module(request["source"]["file_path"], run_id)
-        model = instantiate_model(module, request["source"]["class_name"])
+        module = load_user_module(
+            request["source"]["file_path"],
+            run_id,
+            request["source"]["content_sha256"],
+        )
+        model = instantiate_model(
+            module,
+            request["source"]["class_name"],
+            request["constructor"]["args"],
+            request["constructor"]["kwargs"],
+        )
         example_inputs = build_tensor_inputs(request["inputs"])
     except UserTraceRuntimeError as exc:
         return trace_error(

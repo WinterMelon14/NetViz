@@ -288,6 +288,15 @@ def safe_literal(node: ast.AST) -> dict[str, Any]:
         if all(item["isLiteral"] for item in values):
             return {"isLiteral": True, "value": [item["value"] for item in values]}
 
+    if isinstance(node, ast.Dict):
+        keys = [safe_literal(key) for key in node.keys]
+        values = [safe_literal(item) for item in node.values]
+        if all(key["isLiteral"] and isinstance(key["value"], str) for key in keys) and all(item["isLiteral"] for item in values):
+            return {
+                "isLiteral": True,
+                "value": {key["value"]: item["value"] for key, item in zip(keys, values)},
+            }
+
     return {"isLiteral": False}
 
 

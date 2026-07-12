@@ -5,20 +5,18 @@ export type UserTensorInputSpec = {
   generator: 'random_normal'
 }
 
-export const MAX_TENSOR_DIMENSIONS = 8
-export const MAX_TENSOR_ELEMENTS = 16_777_216
-export const MAX_TOTAL_INPUT_BYTES = 64 * 1024 * 1024
-export const FLOAT32_BYTES = 4
+export { FLOAT32_BYTES, MAX_TENSOR_DIMENSIONS, MAX_TENSOR_ELEMENTS, MAX_TOTAL_INPUT_BYTES }
 
 export type UserTraceBridgeRequest = {
   run_id: string
   source: {
     selection_id: string
     class_name: string
+    content_sha256: string
   }
   constructor: {
-    args: []
-    kwargs: Record<string, never>
+    args: SerializableLiteral[]
+    kwargs: Record<string, SerializableLiteral>
   }
   inputs: [UserTensorInputSpec]
 }
@@ -29,5 +27,13 @@ export type UserTraceWorkerRequest = Omit<UserTraceBridgeRequest, 'source'> & {
   source: {
     file_path: string
     class_name: string
+    content_sha256: string
   }
 }
+import {
+  FLOAT32_BYTES,
+  MAX_TENSOR_DIMENSIONS,
+  MAX_TENSOR_ELEMENTS,
+  MAX_TOTAL_INPUT_BYTES,
+} from '../userTrace/constants.ts'
+import type { SerializableLiteral } from './sourceInspectionApi.ts'
