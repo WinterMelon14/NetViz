@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
 import { TraceRecovery } from './app/TraceRecovery'
-import { cancelTrace, consumeTraceFile, createTraceRunId, runKnownModelTrace, type TraceRunState } from './desktop/desktopTraceApi'
+import { cancelTrace, consumeTraceFile, createTraceRunId, runKnownModelTrace, runSelectedUserTrace, type RunTraceResponse, type TraceRunState } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -12,6 +12,8 @@ import { NodeInspector } from './inspector/NodeInspector'
 import { SourceInspectionPanel } from './sourceInspection/SourceInspectionPanel'
 import { TraceLoadDialog } from './trace/TraceLoadDialog'
 import { useTraceLoader } from './trace/useTraceLoader'
+import { UserTracePanel } from './userTrace/UserTracePanel'
+import type { UserTraceDraft } from './userTrace/UserTracePanel'
 
 function App() {
   const inspectorRef = useRef<HTMLElement | null>(null)
@@ -23,6 +25,7 @@ function App() {
   const cancellingDesktopRunId = useRef<string | null>(null)
   const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
   const [isSourceInspectionOpen, setIsSourceInspectionOpen] = useState(false)
+  const [isUserTraceOpen, setIsUserTraceOpen] = useState(false)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
@@ -111,7 +114,10 @@ function App() {
     return 'failed'
   }
 
-  function runDesktopTraceSpike() {
+  function startDesktopTrace(
+    operation: (runId: string) => Promise<RunTraceResponse>,
+    onSuccess?: () => void,
+  ) {
     if (activeDesktopRunId.current) return
 
     const runId = createTraceRunId()
@@ -124,7 +130,7 @@ function App() {
       }
     }, 0)
 
-    runKnownModelTrace(runId)
+    operation(runId)
       .then(async (result) => {
         if (activeDesktopRunId.current !== runId || cancellingDesktopRunId.current === runId) return
 
@@ -135,6 +141,7 @@ function App() {
             loadTracePayload(await consumeTraceFile(runId, result.trace.path))
           }
           setDesktopTraceState('succeeded')
+          onSuccess?.()
           return
         }
 
@@ -151,6 +158,17 @@ function App() {
           activeDesktopRunId.current = null
         }
       })
+  }
+
+  function runDesktopTraceSpike() {
+    startDesktopTrace(runKnownModelTrace)
+  }
+
+  function runSelectedModelTrace(request: UserTraceDraft) {
+    startDesktopTrace(
+      (runId) => runSelectedUserTrace({ ...request, run_id: runId }),
+      () => setIsUserTraceOpen(false),
+    )
   }
 
   async function cancelDesktopTrace() {
@@ -208,6 +226,7 @@ function App() {
         modelName={trace.model_name}
         onOpenLoader={() => setIsLoadModalOpen(true)}
         onOpenSourceInspection={() => setIsSourceInspectionOpen(true)}
+        onOpenUserTrace={() => setIsUserTraceOpen(true)}
         onFitGraph={resetGraphPositions}
         onRunDesktopTrace={runDesktopTraceSpike}
         onCancelDesktopTrace={cancelDesktopTrace}
@@ -270,6 +289,16 @@ function App() {
 
       {isSourceInspectionOpen ? (
         <SourceInspectionPanel onClose={() => setIsSourceInspectionOpen(false)} />
+      ) : null}
+
+      {isUserTraceOpen ? (
+        <UserTracePanel
+          traceState={desktopTraceState}
+          traceError={desktopTraceError}
+          onRun={runSelectedModelTrace}
+          onCancel={cancelDesktopTrace}
+          onClose={() => setIsUserTraceOpen(false)}
+        />
       ) : null}
     </main>
   )

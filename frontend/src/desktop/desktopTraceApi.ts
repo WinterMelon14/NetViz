@@ -1,5 +1,6 @@
 import type { TracePayload } from '../trace/types.ts'
 import { validateTracePayload } from '../trace/validateTracePayload.ts'
+import type { UserTraceBridgeRequest } from './userTraceRequest.ts'
 
 const protocolVersion = 1
 
@@ -38,6 +39,9 @@ declare global {
     pywebview?: {
       api?: {
         runKnownModelTrace?: (runId: string) => Promise<unknown>
+        runSelectedUserTrace?: (request: UserTraceBridgeRequest) => Promise<unknown>
+        selectPythonFile?: () => Promise<unknown>
+        inspectSelectedPythonFile?: (selectionId: string) => Promise<unknown>
         cancelTrace?: (runId: string) => Promise<unknown>
         consumeTraceFile?: (runId: string, path: string) => Promise<unknown>
         inspectModelSource?: (request: { sourceText: string }) => Promise<unknown>
@@ -201,6 +205,26 @@ export async function runKnownModelTrace(runId: string) {
       protocol_version: protocolVersion,
       type: 'error',
       run_id: null,
+      error: {
+        code: 'desktop_bridge_unavailable',
+        title: 'Desktop bridge unavailable',
+        message: error instanceof Error ? error.message : 'The desktop bridge could not be reached.',
+        stage: 'desktop_bridge',
+      },
+    } satisfies RunTraceResponse
+  }
+}
+
+export async function runSelectedUserTrace(request: UserTraceBridgeRequest) {
+  try {
+    await waitForPywebviewReady()
+    const result = await window.pywebview?.api?.runSelectedUserTrace?.(request)
+    return parseRunTraceResponse(result)
+  } catch (error) {
+    return {
+      protocol_version: protocolVersion,
+      type: 'error',
+      run_id: request.run_id,
       error: {
         code: 'desktop_bridge_unavailable',
         title: 'Desktop bridge unavailable',

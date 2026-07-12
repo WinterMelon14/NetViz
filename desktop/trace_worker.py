@@ -4,6 +4,13 @@ import traceback
 import uuid
 from pathlib import Path
 
+from desktop.user_model_runtime import (
+    UserTraceRuntimeError,
+    build_tensor_inputs,
+    instantiate_model,
+    load_user_module,
+)
+from desktop.user_trace_request import UserTraceRequestError, validate_user_trace_request
 from desktop.trace_protocol import (
     MAX_INLINE_TRACE_BYTES,
     MAX_TRACE_FILE_BYTES,
@@ -46,52 +53,69 @@ def trace_success_for_transport(run_id: str, payload: dict, output_path: str | N
 
 def load_request(path: str | None):
     if not path:
-        return {
-            "protocol_version": PROTOCOL_VERSION,
-            "run_id": str(uuid.uuid4()),
-        }
+        raise ValueError("A host-created request file is required.")
 
     with Path(path).open("r", encoding="utf-8") as request_file:
         request = json.load(request_file)
-
-    if not isinstance(request, dict) or request.get("protocol_version") != PROTOCOL_VERSION:
-        raise ValueError("Unsupported worker request protocol.")
 
     return request
 
 
 def run_trace(request_path: str | None = None):
     try:
-        request = load_request(request_path)
-        run_id = str(request.get("run_id") or uuid.uuid4())
+        raw_request = load_request(request_path)
+        run_id = str(raw_request.get("run_id") or uuid.uuid4()) if isinstance(raw_request, dict) else str(uuid.uuid4())
+        expected_output_path = Path(request_path).parent / "result.json" if request_path else None
+        request = validate_user_trace_request(raw_request, expected_output_path=expected_output_path)
+    except UserTraceRequestError as exc:
+        return trace_error(
+            locals().get("run_id"),
+            "user_trace_request_invalid",
+            "Trace request is invalid",
+            str(exc),
+            "request_validation",
+            {"path": exc.path},
+        )
     except Exception as exc:
         run_id = str(uuid.uuid4())
         print(traceback.format_exc(), file=sys.stderr)
         return trace_error(
             run_id,
-            "worker_protocol_error",
+            "user_trace_request_invalid",
             "Trace worker could not read its request",
             str(exc),
-            "worker_protocol",
+            "request_validation",
             exc=exc,
         )
 
     try:
-        from desktop.known_model import TestModel, known_model_input
+        module = load_user_module(request["source"]["file_path"], run_id)
+        model = instantiate_model(module, request["source"]["class_name"])
+        example_inputs = build_tensor_inputs(request["inputs"])
+    except UserTraceRuntimeError as exc:
+        return trace_error(
+            run_id,
+            exc.code,
+            exc.title,
+            exc.message,
+            exc.stage,
+            exc.details,
+            exc,
+        )
+
+    try:
         from util.summary import model_summary
 
-        model = TestModel()
-        example_input = known_model_input()
-        payload = model_summary(model, example_input, run_shape_prop=False)
+        payload = model_summary(model, *example_inputs, run_shape_prop=False)
         return trace_success_for_transport(run_id, payload, request.get("output_path"))
     except Exception as exc:
         print(traceback.format_exc(), file=sys.stderr)
         return trace_error(
             run_id,
-            "known_model_trace_failed",
-            "Known model trace failed",
+            "trace_execution_failed",
+            "Model trace failed",
             str(exc),
-            "worker_execution",
+            "forward_trace",
             exc=exc,
         )
 

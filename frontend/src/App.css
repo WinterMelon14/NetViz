@@ -883,6 +883,142 @@ code {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), 0 0 34px var(--accent-glow);
 }
 
+.user-trace-modal {
+  width: min(860px, 100%);
+  max-height: calc(100svh - 48px);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46);
+}
+
+.user-trace-modal > header,
+.user-trace-modal > footer,
+.user-trace-section-heading,
+.selected-file-row,
+.input-spec-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.user-trace-modal > footer {
+  justify-content: flex-end;
+}
+
+.user-trace-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.user-trace-section-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-trace-section-heading > div > span {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--panel);
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.selected-file-row,
+.input-spec-summary {
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.selected-file-row strong,
+.input-spec-summary strong {
+  color: var(--text-strong);
+}
+
+.candidate-options {
+  display: grid;
+  gap: 6px;
+}
+
+.candidate-options label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.candidate-options label > span {
+  display: grid;
+  gap: 2px;
+}
+
+.candidate-options small,
+.candidate-options em {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.candidate-option--disabled {
+  opacity: 0.55;
+  cursor: not-allowed !important;
+}
+
+.dimension-editor {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dimension-editor label {
+  width: 88px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dimension-editor input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.dimension-editor button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.input-spec-summary {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.input-spec-summary strong {
+  margin-left: auto;
+}
+
 .load-modal header,
 .load-modal footer,
 .source-modal header,

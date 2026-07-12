@@ -10,6 +10,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from desktop.source_inspection import inspect_model_source_request
+from desktop.selected_files import SelectedPythonFiles
 from desktop.trace_protocol import (
     MAX_DIAGNOSTIC_BYTES,
     MAX_PROTOCOL_OUTPUT_BYTES,
@@ -84,7 +85,23 @@ class TraceRunManager:
         self._completed_trace_files: dict[str, CompletedTraceFile] = {}
 
     def run_known_model_trace(self, run_id: str | None = None) -> dict[str, Any]:
-        active_run_id = run_id or str(uuid4())
+        return self.run_user_trace({
+            "run_id": run_id or str(uuid4()),
+            "source": {
+                "file_path": str(Path(__file__).with_name("known_model.py")),
+                "class_name": "TestModel",
+            },
+            "constructor": {"args": [], "kwargs": {}},
+            "inputs": [{
+                "kind": "tensor",
+                "shape": [1, 4],
+                "dtype": "float32",
+                "generator": "random_normal",
+            }],
+        })
+
+    def run_user_trace(self, request: Any) -> dict[str, Any]:
+        active_run_id = request.get("run_id") if isinstance(request, dict) else None
         if not active_run_id:
             return trace_error(
                 None,
@@ -93,6 +110,9 @@ class TraceRunManager:
                 "The frontend did not provide a valid run ID.",
                 "host_lifecycle",
             )
+        return self._run_trace_request(active_run_id, request)
+
+    def _run_trace_request(self, active_run_id: str, bridge_request: dict[str, Any]) -> dict[str, Any]:
 
         with self._lock:
             if self._active_runs:
@@ -116,16 +136,14 @@ class TraceRunManager:
             active_run.temp_dir = temp_dir
             active_run.request_path = request_path
             active_run.output_path = output_path
+            worker_request = dict(bridge_request)
+            worker_request.update({
+                "protocol_version": PROTOCOL_VERSION,
+                "run_id": active_run_id,
+                "output_path": str(output_path),
+            })
             request_path.write_text(
-                json.dumps(
-                    {
-                        "protocol_version": PROTOCOL_VERSION,
-                        "run_id": active_run_id,
-                        "model": "desktop.known_model.TestModel",
-                        "input": "torch.randn(1, 4)",
-                        "output_path": str(output_path),
-                    }
-                ),
+                json.dumps(worker_request),
                 encoding="utf-8",
             )
 
@@ -378,11 +396,24 @@ class TraceRunManager:
 
 
 class DesktopTraceApi:
-    def __init__(self, manager: TraceRunManager | None = None):
+    def __init__(self, manager: TraceRunManager | None = None, selected_files: SelectedPythonFiles | None = None):
         self.manager = manager or TraceRunManager()
+        self.selected_files = selected_files or SelectedPythonFiles()
 
     def runKnownModelTrace(self, runId: str | None = None):
         return self.manager.run_known_model_trace(runId)
+
+    def runSelectedUserTrace(self, request: Any):
+        resolved = self.selected_files.trace_request(request)
+        if resolved.get("type") == "error":
+            return resolved
+        return self.manager.run_user_trace(resolved)
+
+    def selectPythonFile(self):
+        return self.selected_files.select()
+
+    def inspectSelectedPythonFile(self, selectionId: Any):
+        return self.selected_files.inspect(selectionId)
 
     def cancelTrace(self, runId: str):
         return self.manager.cancel_trace(runId)

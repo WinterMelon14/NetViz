@@ -143,7 +143,7 @@ function normalizeCandidate(value: ModelCandidate): ModelCandidate {
   }
 }
 
-function parseInspectModelSourceResult(value: unknown): InspectModelSourceResult {
+export function parseInspectModelSourceResult(value: unknown): InspectModelSourceResult {
   if (!isRecord(value)) {
     return {
       ok: false,

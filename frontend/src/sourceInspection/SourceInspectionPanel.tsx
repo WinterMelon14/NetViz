@@ -93,9 +93,12 @@ export function SourceInspectionPanel({ onClose }: { onClose: () => void }) {
   const mountedRef = useRef(true)
   const isInspecting = inspectionState.status === 'inspecting'
 
-  useEffect(() => () => {
-    mountedRef.current = false
-    requestIdRef.current += 1
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      requestIdRef.current += 1
+    }
   }, [])
 
   function runInspection() {
