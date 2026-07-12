@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
-import { cancelTrace, createTraceRunId, runKnownModelTrace, type TraceRunState } from './desktop/desktopTraceApi'
+import { cancelTrace, consumeTraceFile, createTraceRunId, runKnownModelTrace, type TraceRunState } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -123,17 +123,16 @@ function App() {
     }, 0)
 
     runKnownModelTrace(runId)
-      .then((result) => {
+      .then(async (result) => {
         if (activeDesktopRunId.current !== runId || cancellingDesktopRunId.current === runId) return
 
         if (result.type === 'success') {
           if (result.trace.transfer === 'inline') {
             loadTracePayload(result.trace.payload)
-            setDesktopTraceState('succeeded')
           } else {
-            setDesktopTraceError('Desktop trace returned a file transfer, which is not implemented in this spike.')
-            setDesktopTraceState('failed')
+            loadTracePayload(await consumeTraceFile(runId, result.trace.path))
           }
+          setDesktopTraceState('succeeded')
           return
         }
 

@@ -16,7 +16,20 @@ export function useNodeDrag({
   setLayoutPositions: Dispatch<SetStateAction<LayoutPositions>>
 }) {
   const nodeDragRef = useRef({ active: false, nodeId: '', x: 0, y: 0, startNodeX: 0, startNodeY: 0, moved: false })
+  const pendingPositionRef = useRef<{ nodeId: string; x: number; y: number } | null>(null)
+  const dragFrameRef = useRef<number | null>(null)
   const [isDraggingNode, setIsDraggingNode] = useState(false)
+
+  const commitPendingPosition = useCallback(() => {
+    const pending = pendingPositionRef.current
+    pendingPositionRef.current = null
+    dragFrameRef.current = null
+    if (!pending) return
+    setLayoutPositions((current) => ({
+      ...current,
+      [pending.nodeId]: { x: pending.x, y: pending.y },
+    }))
+  }, [setLayoutPositions])
 
   const onNodePointerDown = useCallback((event: PointerEvent<HTMLButtonElement>, nodeId: string) => {
     event.stopPropagation()
@@ -42,19 +55,22 @@ export function useNodeDrag({
     const node = nodesById.get(nodeDragRef.current.nodeId)
     if (!node) return
 
-    setLayoutPositions((current) => ({
-      ...current,
-      [node.id]: {
-        x: nodeDragRef.current.startNodeX + dx,
-        y: nodeDragRef.current.startNodeY + dy,
-      },
-    }))
-  }, [layout, nodesById, scale, setLayoutPositions])
+    pendingPositionRef.current = {
+      nodeId: node.id,
+      x: nodeDragRef.current.startNodeX + dx,
+      y: nodeDragRef.current.startNodeY + dy,
+    }
+    if (dragFrameRef.current === null) {
+      dragFrameRef.current = window.requestAnimationFrame(commitPendingPosition)
+    }
+  }, [commitPendingPosition, layout, nodesById, scale])
 
   const onNodePointerUp = useCallback(() => {
+    if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current)
+    commitPendingPosition()
     nodeDragRef.current.active = false
     setIsDraggingNode(false)
-  }, [])
+  }, [commitPendingPosition])
 
   const wasNodeDragged = useCallback(() => nodeDragRef.current.moved, [])
 

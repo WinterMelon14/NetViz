@@ -20,6 +20,8 @@ export function useGraphViewport({
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef({ active: false, x: 0, y: 0, moved: false })
+  const pendingPanRef = useRef({ dx: 0, dy: 0 })
+  const panFrameRef = useRef<number | null>(null)
   const [view, setView] = useState<GraphView>({ x: 36, y: 36, scale: 1 })
 
   const fitView = useCallback(() => {
@@ -68,7 +70,16 @@ export function useGraphViewport({
     if (Math.abs(dx) + Math.abs(dy) > 2) dragRef.current.moved = true
     dragRef.current.x = event.clientX
     dragRef.current.y = event.clientY
-    setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }))
+    pendingPanRef.current.dx += dx
+    pendingPanRef.current.dy += dy
+    if (panFrameRef.current === null) {
+      panFrameRef.current = window.requestAnimationFrame(() => {
+        const pending = pendingPanRef.current
+        pendingPanRef.current = { dx: 0, dy: 0 }
+        panFrameRef.current = null
+        setView((current) => ({ ...current, x: current.x + pending.dx, y: current.y + pending.dy }))
+      })
+    }
   }, [])
 
   const onViewportPointerUp = useCallback(() => {
@@ -101,6 +112,10 @@ export function useGraphViewport({
     currentViewport.addEventListener('wheel', onWheel, { passive: false })
     return () => currentViewport.removeEventListener('wheel', onWheel)
   }, [view.scale, view.x, view.y])
+
+  useEffect(() => () => {
+    if (panFrameRef.current !== null) window.cancelAnimationFrame(panFrameRef.current)
+  }, [])
 
   return {
     viewportRef,

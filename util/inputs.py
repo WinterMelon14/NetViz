@@ -13,7 +13,6 @@ def flatten_node_runtime_inputs(
     spec: Any,
     value: Any,
     *,
-    node_value_cache: dict[str, Any],
     max_preview_items: int,
     input_records: list[dict],
     input_refs: list[dict],
@@ -102,7 +101,6 @@ def flatten_node_runtime_inputs(
             flatten_node_runtime_inputs(
                 child_spec,
                 child_value,
-                node_value_cache=node_value_cache,
                 max_preview_items=max_preview_items,
                 input_records=input_records,
                 input_refs=input_refs,
@@ -119,7 +117,6 @@ def flatten_node_runtime_inputs(
             flatten_node_runtime_inputs(
                 child_spec,
                 child_value,
-                node_value_cache=node_value_cache,
                 max_preview_items=max_preview_items,
                 input_records=input_records,
                 input_refs=input_refs,
@@ -143,7 +140,6 @@ def build_input_records(
     runtime_args,
     runtime_kwargs,
     *,
-    node_value_cache: dict[str, Any],
     max_preview_items: int,
 ):
     records = []
@@ -156,7 +152,6 @@ def build_input_records(
         flatten_node_runtime_inputs(
             spec,
             value,
-            node_value_cache=node_value_cache,
             max_preview_items=max_preview_items,
             input_records=records,
             input_refs=refs,
@@ -170,7 +165,6 @@ def build_input_records(
         flatten_node_runtime_inputs(
             spec,
             value,
-            node_value_cache=node_value_cache,
             max_preview_items=max_preview_items,
             input_records=records,
             input_refs=refs,

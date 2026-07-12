@@ -1,4 +1,6 @@
 import type { ELK as ElkApi, ElkNode } from 'elkjs'
+import ELK from 'elkjs/lib/elk-api.js'
+import ElkWorker from 'elkjs/lib/elk-worker.min.js?worker'
 import type { TraceEdge, TraceNode } from '../trace/types'
 import { columnGap, nodeHeight, padding, rowGap } from './constants'
 import { nodeCardWidth } from './nodePresentation'
@@ -9,6 +11,14 @@ export type LayoutResult = {
     x: number
     y: number
   })[]
+  width: number
+  height: number
+}
+
+export type LayoutNodeInput = { id: string; width: number; height: number }
+
+export type LayoutPositionResult = {
+  nodes: (LayoutNodeInput & { depth: number; x: number; y: number })[]
   width: number
   height: number
 }
@@ -135,12 +145,11 @@ let elkInstance: ElkApi | null = null
 async function getElk() {
   if (elkInstance) return elkInstance
 
-  const { default: ELK } = await import('elkjs/lib/elk.bundled.js')
-  elkInstance = new ELK()
+  elkInstance = new ELK({ workerFactory: () => new ElkWorker() })
   return elkInstance
 }
 
-function fallbackLayout(): LayoutResult {
+function fallbackLayout(): LayoutPositionResult {
   return {
     nodes: [],
     width: padding * 2,
@@ -175,10 +184,10 @@ function fallbackGraphSize(nodes: { x: number; y: number; width: number; height:
   }
 }
 
-export async function buildLayout(
-  nodes: TraceNode[],
+export async function buildLayoutPositions(
+  nodes: LayoutNodeInput[],
   edges: TraceEdge[],
-): Promise<LayoutResult> {
+): Promise<LayoutPositionResult> {
   if (!nodes.length) return fallbackLayout()
 
   const nodeIds = new Set(nodes.map((node) => node.id))
@@ -210,8 +219,8 @@ export async function buildLayout(
     },
     children: nodes.map((node) => ({
       id: node.id,
-      width: nodeCardWidth(node),
-      height: nodeHeight,
+      width: node.width,
+      height: node.height,
     })),
     edges: validEdges.map((edge) => ({
       id: edge.id,
@@ -234,8 +243,8 @@ export async function buildLayout(
       id: node.id,
       x: layoutNode?.x ?? padding,
       y: layoutNode?.y ?? padding,
-      width: layoutNode?.width ?? nodeCardWidth(node),
-      height: layoutNode?.height ?? nodeHeight,
+      width: layoutNode?.width ?? node.width,
+      height: layoutNode?.height ?? node.height,
     }
   })
 
@@ -259,5 +268,23 @@ export async function buildLayout(
     })),
     width: graphSize.width,
     height: graphSize.height,
+  }
+}
+
+export async function buildLayout(nodes: TraceNode[], edges: TraceEdge[]): Promise<LayoutResult> {
+  const layout = await buildLayoutPositions(
+    nodes.map((node) => ({ id: node.id, width: nodeCardWidth(node), height: nodeHeight })),
+    edges,
+  )
+  const positionsById = new Map(layout.nodes.map((node) => [node.id, node]))
+  return {
+    nodes: nodes.map((node) => ({
+      ...node,
+      depth: positionsById.get(node.id)?.depth ?? 0,
+      x: positionsById.get(node.id)?.x ?? padding,
+      y: positionsById.get(node.id)?.y ?? padding,
+    })),
+    width: layout.width,
+    height: layout.height,
   }
 }

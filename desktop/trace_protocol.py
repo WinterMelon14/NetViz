@@ -2,6 +2,11 @@ import traceback
 from typing import Any
 
 PROTOCOL_VERSION = 1
+MAX_INLINE_TRACE_BYTES = 1 * 1024 * 1024
+MAX_TRACE_FILE_BYTES = 256 * 1024 * 1024
+MAX_PROTOCOL_OUTPUT_BYTES = MAX_INLINE_TRACE_BYTES + 64 * 1024
+MAX_DIAGNOSTIC_BYTES = 64 * 1024
+TRACE_FILE_TTL_SECONDS = 5 * 60
 
 
 def trace_error(
@@ -36,6 +41,20 @@ def trace_success(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "trace": {
             "transfer": "inline",
             "payload": payload,
+        },
+        "warnings": [],
+    }
+
+
+def trace_file_success(run_id: str, path: str, size_bytes: int) -> dict[str, Any]:
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "type": "success",
+        "run_id": run_id,
+        "trace": {
+            "transfer": "file",
+            "path": path,
+            "size_bytes": size_bytes,
         },
         "warnings": [],
     }
@@ -110,12 +129,13 @@ def validate_worker_result(value: Any, expected_run_id: str, stderr: str = "") -
                 )
         elif transfer == "file":
             path = trace.get("path")
-            if not isinstance(path, str) or not path:
+            size_bytes = trace.get("size_bytes")
+            if not isinstance(path, str) or not path or not isinstance(size_bytes, int) or size_bytes < 0:
                 return trace_error(
                     expected_run_id,
                     "worker_protocol_error",
                     "Trace worker returned an invalid file trace",
-                    "A file trace transfer must include a non-empty path.",
+                    "A file trace transfer must include a non-empty path and non-negative byte size.",
                     "worker_protocol",
                     {"stderr": stderr},
                 )

@@ -3,13 +3,22 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
 from desktop.source_inspection import inspect_model_source_request
-from desktop.trace_protocol import PROTOCOL_VERSION, trace_error, validate_worker_result
+from desktop.trace_protocol import (
+    MAX_DIAGNOSTIC_BYTES,
+    MAX_PROTOCOL_OUTPUT_BYTES,
+    MAX_TRACE_FILE_BYTES,
+    PROTOCOL_VERSION,
+    TRACE_FILE_TTL_SECONDS,
+    trace_error,
+    validate_worker_result,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEV_SERVER_URL = "http://localhost:5173/"
@@ -26,6 +35,22 @@ class ActiveTraceRun:
     request_path: Path | None = None
     output_path: Path | None = None
     cancel_requested: bool = False
+
+
+@dataclass
+class CompletedTraceFile:
+    run_id: str
+    temp_dir: tempfile.TemporaryDirectory[str]
+    path: Path
+    expires_at: float
+    timer: threading.Timer | None = None
+
+
+def read_bounded_text(path: Path, max_bytes: int) -> tuple[str, bool]:
+    with path.open("rb") as stream:
+        content = stream.read(max_bytes + 1)
+    exceeded = len(content) > max_bytes
+    return content[:max_bytes].decode("utf-8", errors="replace"), exceeded
 
 
 def default_worker_command(request_path: Path) -> list[str]:
@@ -56,6 +81,7 @@ class TraceRunManager:
         self.temp_root = temp_root
         self._lock = threading.Lock()
         self._active_runs: dict[str, ActiveTraceRun] = {}
+        self._completed_trace_files: dict[str, CompletedTraceFile] = {}
 
     def run_known_model_trace(self, run_id: str | None = None) -> dict[str, Any]:
         active_run_id = run_id or str(uuid4())
@@ -85,6 +111,8 @@ class TraceRunManager:
             temp_dir = tempfile.TemporaryDirectory(prefix="tensor-trace-run-", dir=self.temp_root)
             request_path = Path(temp_dir.name) / "request.json"
             output_path = Path(temp_dir.name) / "result.json"
+            protocol_path = Path(temp_dir.name) / "protocol.jsonl"
+            diagnostic_path = Path(temp_dir.name) / "diagnostic.log"
             active_run.temp_dir = temp_dir
             active_run.request_path = request_path
             active_run.output_path = output_path
@@ -112,13 +140,19 @@ class TraceRunManager:
                         "The trace run was cancelled before its worker started.",
                         "worker_cancelled",
                     )
-                process = subprocess.Popen(
-                    self.worker_command_factory(request_path),
-                    cwd=REPO_ROOT,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
+                protocol_stream = protocol_path.open("wb")
+                diagnostic_stream = diagnostic_path.open("wb")
+                try:
+                    process = subprocess.Popen(
+                        self.worker_command_factory(request_path),
+                        cwd=REPO_ROOT,
+                        stdout=protocol_stream,
+                        stderr=diagnostic_stream,
+                    )
+                except Exception:
+                    protocol_stream.close()
+                    diagnostic_stream.close()
+                    raise
                 active_run.process = process
         except Exception as exc:
             with self._lock:
@@ -134,11 +168,26 @@ class TraceRunManager:
                 exc=exc,
             )
 
+        timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=self.timeout_seconds)
+            process.wait(timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired:
+            timed_out = True
             terminate_process(process)
-            _, stderr = process.communicate()
+        finally:
+            protocol_stream.close()
+            diagnostic_stream.close()
+            with self._lock:
+                removed_run = self._active_runs.pop(active_run_id, None)
+            cancelled = bool(removed_run and removed_run.cancel_requested)
+
+        stdout, stdout_exceeded = read_bounded_text(protocol_path, MAX_PROTOCOL_OUTPUT_BYTES)
+        stderr, stderr_exceeded = read_bounded_text(diagnostic_path, MAX_DIAGNOSTIC_BYTES)
+        if stderr_exceeded:
+            stderr += "\n[diagnostic output truncated]"
+
+        if timed_out:
+            temp_dir.cleanup()
             return trace_error(
                 active_run_id,
                 "timeout",
@@ -147,14 +196,9 @@ class TraceRunManager:
                 "worker_timeout",
                 {"timeout_seconds": self.timeout_seconds, "stderr": stderr},
             )
-        finally:
-            with self._lock:
-                removed_run = self._active_runs.pop(active_run_id, None)
-            cancelled = bool(removed_run and removed_run.cancel_requested)
-            if active_run.temp_dir:
-                active_run.temp_dir.cleanup()
 
         if cancelled:
+            temp_dir.cleanup()
             return trace_error(
                 active_run_id,
                 "cancelled",
@@ -164,6 +208,7 @@ class TraceRunManager:
             )
 
         if process.returncode != 0:
+            temp_dir.cleanup()
             return trace_error(
                 active_run_id,
                 "worker_crashed",
@@ -173,7 +218,101 @@ class TraceRunManager:
                 {"exit_code": process.returncode, "stdout": stdout, "stderr": stderr},
             )
 
-        return self._parse_worker_stdout(active_run_id, stdout, stderr)
+        if stdout_exceeded:
+            temp_dir.cleanup()
+            return trace_error(
+                active_run_id,
+                "worker_protocol_error",
+                "Trace worker protocol output is too large",
+                "The worker exceeded the configured protocol output limit.",
+                "worker_protocol",
+                {"max_bytes": MAX_PROTOCOL_OUTPUT_BYTES, "stderr": stderr},
+            )
+
+        result = self._parse_worker_stdout(active_run_id, stdout, stderr)
+        trace = result.get("trace") if result.get("type") == "success" else None
+        if isinstance(trace, dict) and trace.get("transfer") == "file":
+            if Path(trace["path"]) != output_path or not output_path.is_file():
+                temp_dir.cleanup()
+                return trace_error(
+                    active_run_id,
+                    "worker_protocol_error",
+                    "Trace worker returned an invalid result path",
+                    "The file-backed result did not match the host-provided output path.",
+                    "worker_protocol",
+                )
+            actual_size = output_path.stat().st_size
+            if actual_size != trace.get("size_bytes") or actual_size > MAX_TRACE_FILE_BYTES:
+                temp_dir.cleanup()
+                return trace_error(
+                    active_run_id,
+                    "trace_too_large",
+                    "Trace result size is invalid",
+                    "The file-backed trace size did not match the protocol or exceeded the configured limit.",
+                    "worker_transport",
+                    {"size_bytes": actual_size, "max_bytes": MAX_TRACE_FILE_BYTES},
+                )
+            self._retain_trace_file(active_run_id, temp_dir, output_path)
+            return result
+
+        temp_dir.cleanup()
+        return result
+
+    def _retain_trace_file(self, run_id: str, temp_dir: tempfile.TemporaryDirectory[str], path: Path) -> None:
+        completed = CompletedTraceFile(run_id, temp_dir, path, time.monotonic() + TRACE_FILE_TTL_SECONDS)
+        timer = threading.Timer(TRACE_FILE_TTL_SECONDS, self._expire_trace_file, args=(run_id,))
+        timer.daemon = True
+        completed.timer = timer
+        with self._lock:
+            self._completed_trace_files[run_id] = completed
+        timer.start()
+
+    def _expire_trace_file(self, run_id: str) -> None:
+        with self._lock:
+            completed = self._completed_trace_files.pop(run_id, None)
+        if completed:
+            completed.temp_dir.cleanup()
+
+    def consume_trace_file(self, run_id: str, path: str) -> dict[str, Any]:
+        with self._lock:
+            completed = self._completed_trace_files.pop(run_id, None)
+        if not completed or str(completed.path) != path or time.monotonic() > completed.expires_at:
+            if completed:
+                completed.timer.cancel() if completed.timer else None
+                completed.temp_dir.cleanup()
+            return trace_error(
+                run_id,
+                "trace_file_unavailable",
+                "Trace file is unavailable",
+                "The file-backed trace was already consumed, expired, or did not match this run.",
+                "host_transport",
+            )
+
+        if completed.timer:
+            completed.timer.cancel()
+        try:
+            payload_text, exceeded = read_bounded_text(completed.path, MAX_TRACE_FILE_BYTES)
+            if exceeded:
+                return trace_error(
+                    run_id,
+                    "trace_too_large",
+                    "Trace result is too large",
+                    "The file-backed trace exceeds the configured consumption limit.",
+                    "host_transport",
+                )
+            payload = json.loads(payload_text)
+            return {"ok": True, "run_id": run_id, "payload": payload}
+        except Exception as exc:
+            return trace_error(
+                run_id,
+                "trace_file_invalid",
+                "Trace file could not be loaded",
+                str(exc),
+                "host_transport",
+                exc=exc,
+            )
+        finally:
+            completed.temp_dir.cleanup()
 
     def cancel_trace(self, run_id: str) -> dict[str, Any]:
         with self._lock:
@@ -247,6 +386,9 @@ class DesktopTraceApi:
 
     def cancelTrace(self, runId: str):
         return self.manager.cancel_trace(runId)
+
+    def consumeTraceFile(self, runId: str, path: str):
+        return self.manager.consume_trace_file(runId, path)
 
     def inspectModelSource(self, request: Any):
         return inspect_model_source_request(request)

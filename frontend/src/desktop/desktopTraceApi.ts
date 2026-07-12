@@ -7,7 +7,7 @@ export type TraceRunState = 'idle' | 'starting' | 'running' | 'cancelling' | 'su
 
 type TraceTransfer =
   | { transfer: 'inline'; payload: TracePayload }
-  | { transfer: 'file'; path: string }
+  | { transfer: 'file'; path: string; size_bytes: number }
 
 export type TraceWorkerError = {
   code: string
@@ -39,6 +39,7 @@ declare global {
       api?: {
         runKnownModelTrace?: (runId: string) => Promise<unknown>
         cancelTrace?: (runId: string) => Promise<unknown>
+        consumeTraceFile?: (runId: string, path: string) => Promise<unknown>
         inspectModelSource?: (request: { sourceText: string }) => Promise<unknown>
       }
     }
@@ -112,6 +113,22 @@ function parseRunTraceResponse(value: unknown): RunTraceResponse {
         warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === 'string') : [],
       }
     }
+    if (
+      transfer === 'file'
+      && typeof value.trace.path === 'string'
+      && value.trace.path.length > 0
+      && typeof value.trace.size_bytes === 'number'
+      && Number.isFinite(value.trace.size_bytes)
+      && value.trace.size_bytes >= 0
+    ) {
+      return {
+        protocol_version: protocolVersion,
+        type: 'success',
+        run_id: typeof value.run_id === 'string' ? value.run_id : '',
+        trace: { transfer, path: value.trace.path, size_bytes: value.trace.size_bytes },
+        warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === 'string') : [],
+      }
+    }
   }
 
   if (value.type === 'error') {
@@ -137,7 +154,11 @@ function parseRunTraceResponse(value: unknown): RunTraceResponse {
 }
 
 function hasTraceApi() {
-  return Boolean(window.pywebview?.api?.runKnownModelTrace && window.pywebview.api.cancelTrace)
+  return Boolean(
+    window.pywebview?.api?.runKnownModelTrace
+    && window.pywebview.api.cancelTrace
+    && window.pywebview.api.consumeTraceFile,
+  )
 }
 
 function waitForPywebviewReady() {
@@ -208,4 +229,14 @@ export async function cancelTrace(runId: string) {
       },
     } satisfies RunTraceResponse
   }
+}
+
+export async function consumeTraceFile(runId: string, path: string): Promise<TracePayload> {
+  await waitForPywebviewReady()
+  const result = await window.pywebview?.api?.consumeTraceFile?.(runId, path)
+  if (!isRecord(result) || result.ok !== true) {
+    const error = isRecord(result) && result.type === 'error' ? normalizeError(result.error) : null
+    throw new Error(error?.message ?? 'The desktop trace file could not be loaded.')
+  }
+  return validateTracePayload(result.payload)
 }

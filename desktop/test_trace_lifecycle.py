@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from desktop.host import DesktopTraceApi, TraceRunManager
-from desktop.trace_protocol import PROTOCOL_VERSION
+from desktop.trace_protocol import MAX_DIAGNOSTIC_BYTES, MAX_PROTOCOL_OUTPUT_BYTES, PROTOCOL_VERSION
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
 
@@ -276,6 +276,52 @@ class TraceRunManagerTests(unittest.TestCase):
         result = manager.run_known_model_trace("run-warning")
 
         self.assertEqual(result["error"]["code"], "worker_protocol_error")
+
+    def test_file_transfer_is_consumed_once_and_cleaned_up(self):
+        code = (
+            "import json, pathlib, sys; "
+            "request=json.load(open(sys.argv[1], encoding='utf-8')); "
+            "payload={'model_name':'LargeModel','graph':{'nodes':[],'edges':[]}}; "
+            "text=json.dumps(payload, separators=(',', ':')); "
+            "pathlib.Path(request['output_path']).write_text(text, encoding='utf-8'); "
+            "print(json.dumps({'protocol_version':1,'type':'success','run_id':request['run_id'],"
+            "'trace':{'transfer':'file','path':request['output_path'],'size_bytes':len(text.encode('utf-8'))},"
+            "'warnings':[]}))"
+        )
+        with tempfile.TemporaryDirectory() as temp_root:
+            manager = TraceRunManager(worker_command_factory=worker_command(code), temp_root=Path(temp_root))
+            result = manager.run_known_model_trace("run-file")
+            trace_path = result["trace"]["path"]
+
+            consumed = manager.consume_trace_file("run-file", trace_path)
+            consumed_again = manager.consume_trace_file("run-file", trace_path)
+
+            self.assertTrue(consumed["ok"])
+            self.assertEqual(consumed["payload"]["model_name"], "LargeModel")
+            self.assertEqual(consumed_again["error"]["code"], "trace_file_unavailable")
+            self.assertEqual(list(Path(temp_root).iterdir()), [])
+
+    def test_protocol_output_is_bounded(self):
+        code = f"print('x' * {MAX_PROTOCOL_OUTPUT_BYTES + 1})"
+        manager = TraceRunManager(worker_command_factory=worker_command(code))
+
+        result = manager.run_known_model_trace("run-large-protocol")
+
+        self.assertEqual(result["error"]["code"], "worker_protocol_error")
+        self.assertIn("too large", result["error"]["title"].lower())
+
+    def test_diagnostic_output_is_truncated(self):
+        code = (
+            f"import sys; print('d' * {MAX_DIAGNOSTIC_BYTES + 100}, file=sys.stderr); "
+            "print('not json')"
+        )
+        manager = TraceRunManager(worker_command_factory=worker_command(code))
+
+        result = manager.run_known_model_trace("run-large-diagnostic")
+
+        stderr = result["error"]["details"]["stderr"]
+        self.assertIn("[diagnostic output truncated]", stderr)
+        self.assertLess(len(stderr), MAX_DIAGNOSTIC_BYTES + 100)
 
     def test_temp_files_are_cleaned_up(self):
         code = (

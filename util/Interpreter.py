@@ -1,6 +1,7 @@
 import torch.fx as fx 
 from util.outputs import flatten_outputs 
 from util.inputs import build_input_records
+from util.ops import attrs_for_node
 # ============================================================
 # Interpreter
 # ============================================================
@@ -10,7 +11,7 @@ class SummaryInterpreter(fx.Interpreter):
         super().__init__(gm)
         self.max_preview_items = max_preview_items
 
-        self.node_values = {}
+        self.node_runtime_attrs = {}
         self.node_records = {}
         self.events = []
         self.step = 0
@@ -20,15 +21,16 @@ class SummaryInterpreter(fx.Interpreter):
 
         result = super().run_node(node)
 
-        self.node_values[node.name] = result
-
         inputs, input_refs = build_input_records(
             node,
             runtime_args,
             runtime_kwargs,
-            node_value_cache=self.node_values,
             max_preview_items=self.max_preview_items,
         )
+
+        runtime_attrs = attrs_for_node(node, runtime_output=result)
+        if runtime_attrs:
+            self.node_runtime_attrs[node.name] = runtime_attrs
 
         outputs = flatten_outputs(
             result,

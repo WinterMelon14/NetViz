@@ -1,5 +1,6 @@
 import torch
 import torch.fx as fx
+import warnings
 from torch.fx.passes.shape_prop import ShapeProp
 from util.Interpreter import SummaryInterpreter
 from util.params import * 
@@ -33,8 +34,8 @@ def model_summary(
     if run_shape_prop:
         try:
             ShapeProp(gm).propagate(*example_args, **example_kwargs)
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(f"Shape propagation failed; runtime tracing will continue: {exc}", RuntimeWarning)
 
     # Count module targets to detect module reuse.
     module_target_counts = {}
@@ -115,10 +116,7 @@ def model_summary(
         if mod is not None:
             attrs.update(module_attrs(mod))
 
-        attrs.update(attrs_for_node(
-            node,
-            runtime_output=interp.node_values.get(node.name),
-        ))
+        attrs.update(interp.node_runtime_attrs.get(node.name, {}))
 
         if attrs:
             info["attrs"] = attrs

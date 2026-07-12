@@ -5,6 +5,8 @@ import { parseTraceJson } from './parseTraceJson'
 import type { TracePayload } from './types'
 import { validateTracePayload } from './validateTracePayload'
 
+const LAYOUT_PERSIST_DEBOUNCE_MS = 250
+
 export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void }) {
   const [trace, setTrace] = useState<TracePayload | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -36,7 +38,11 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
 
   useEffect(() => {
     if (!trace) return
-    saveStoredPositions(trace, layoutPositions)
+    const timer = window.setTimeout(
+      () => saveStoredPositions(trace, layoutPositions),
+      LAYOUT_PERSIST_DEBOUNCE_MS,
+    )
+    return () => window.clearTimeout(timer)
   }, [layoutPositions, trace])
 
   function onJsonTextChange(text: string) {
