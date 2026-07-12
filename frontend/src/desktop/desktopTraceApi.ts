@@ -38,6 +38,7 @@ declare global {
       api?: {
         runKnownModelTrace?: (runId: string) => Promise<unknown>
         cancelTrace?: (runId: string) => Promise<unknown>
+        inspectModelSource?: (request: { sourceText: string }) => Promise<unknown>
       }
     }
   }

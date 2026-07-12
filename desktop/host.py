@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from desktop.source_inspection import inspect_model_source_request
 from desktop.trace_protocol import PROTOCOL_VERSION, trace_error, validate_worker_result
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -228,6 +229,9 @@ class DesktopTraceApi:
 
     def cancelTrace(self, runId: str):
         return self.manager.cancel_trace(runId)
+
+    def inspectModelSource(self, request: Any):
+        return inspect_model_source_request(request)
 
 
 def main():

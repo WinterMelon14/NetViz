@@ -3,6 +3,7 @@ import type { TraceRunState } from '../desktop/desktopTraceApi'
 export function Topbar({
   modelName,
   onOpenLoader,
+  onOpenSourceInspection,
   onFitGraph,
   onRunDesktopTrace,
   onCancelDesktopTrace,
@@ -11,6 +12,7 @@ export function Topbar({
 }: {
   modelName: string
   onOpenLoader: () => void
+  onOpenSourceInspection: () => void
   onFitGraph: () => void
   onRunDesktopTrace: () => void
   onCancelDesktopTrace: () => void
@@ -31,6 +33,7 @@ export function Topbar({
       </div>
       <div className="toolbar">
         <button type="button" onClick={onOpenLoader}>Load JSON</button>
+        <button type="button" onClick={onOpenSourceInspection}>Inspect Source</button>
         <button type="button" onClick={onRunDesktopTrace} disabled={isTraceActive}>
           {runLabel}
         </button>

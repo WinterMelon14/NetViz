@@ -843,21 +843,37 @@ code {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), 0 0 34px var(--accent-glow);
 }
 
+.source-modal {
+  width: min(920px, 100%);
+  max-height: min(860px, calc(100svh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(240px, 1fr) auto auto;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-glass);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), 0 0 34px var(--accent-glow);
+}
+
 .load-modal header,
-.load-modal footer {
+.load-modal footer,
+.source-modal header,
+.source-modal footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.load-modal h2 {
+.load-modal h2,
+.source-modal h2 {
   margin-top: 2px;
 }
 
-.load-modal textarea {
+.load-modal textarea,
+.source-modal textarea {
   width: 100%;
-  min-height: 330px;
   resize: vertical;
   padding: 14px;
   border: 1px solid var(--border);
@@ -870,7 +886,16 @@ code {
   outline: none;
 }
 
-.load-modal textarea:focus {
+.load-modal textarea {
+  min-height: 330px;
+}
+
+.source-modal textarea {
+  min-height: 240px;
+}
+
+.load-modal textarea:focus,
+.source-modal textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -915,6 +940,73 @@ code {
 .load-error {
   color: var(--danger);
   font-family: var(--mono);
+  font-size: 12px;
+}
+
+.source-error,
+.source-warning-list {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--text-strong);
+  background: var(--card);
+  font-size: 12px;
+}
+
+.source-error strong {
+  color: var(--danger);
+}
+
+.source-results {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+}
+
+.source-candidates {
+  display: grid;
+  gap: 10px;
+}
+
+.source-candidate {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.source-candidate header {
+  padding: 0;
+}
+
+.source-candidate header p,
+.source-muted {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.source-candidate header span {
+  color: var(--accent-hot);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.source-candidate ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.source-warning {
+  color: var(--danger);
   font-size: 12px;
 }
 

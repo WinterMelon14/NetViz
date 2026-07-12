@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from desktop.host import TraceRunManager
+from desktop.host import DesktopTraceApi, TraceRunManager
 from desktop.trace_protocol import PROTOCOL_VERSION
 
 
@@ -168,6 +168,24 @@ class TraceRunManagerTests(unittest.TestCase):
 
         self.assertEqual(result["error"]["code"], "worker_protocol_error")
         self.assertIn("multiple", result["error"]["title"].lower())
+
+    def test_source_inspection_bridge_accepts_valid_request(self):
+        api = DesktopTraceApi(manager=TraceRunManager(worker_command_factory=worker_command("")))
+
+        result = api.inspectModelSource({
+            "sourceText": "import torch\nclass Demo(torch.nn.Module):\n    def forward(self, x): return x\n"
+        })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["candidates"][0]["className"], "Demo")
+
+    def test_source_inspection_bridge_rejects_invalid_request_shape(self):
+        api = DesktopTraceApi(manager=TraceRunManager(worker_command_factory=worker_command("")))
+
+        result = api.inspectModelSource({"sourceText": 123})
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "source_protocol_error")
 
 
 if __name__ == "__main__":

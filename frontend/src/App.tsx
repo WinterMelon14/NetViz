@@ -8,6 +8,7 @@ import { useGraphViewport } from './graph/useGraphViewport'
 import { useNodeDrag } from './graph/useNodeDrag'
 import { ModelSummary } from './inspector/ModelSummary'
 import { NodeInspector } from './inspector/NodeInspector'
+import { SourceInspectionPanel } from './sourceInspection/SourceInspectionPanel'
 import { TraceLoadDialog } from './trace/TraceLoadDialog'
 import { useTraceLoader } from './trace/useTraceLoader'
 
@@ -19,6 +20,7 @@ function App() {
   const [desktopTraceState, setDesktopTraceState] = useState<TraceRunState>('idle')
   const activeDesktopRunId = useRef<string | null>(null)
   const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
+  const [isSourceInspectionOpen, setIsSourceInspectionOpen] = useState(false)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
@@ -172,6 +174,7 @@ function App() {
       <Topbar
         modelName={trace.model_name}
         onOpenLoader={() => setIsLoadModalOpen(true)}
+        onOpenSourceInspection={() => setIsSourceInspectionOpen(true)}
         onFitGraph={resetGraphPositions}
         onRunDesktopTrace={runDesktopTraceSpike}
         onCancelDesktopTrace={cancelDesktopTrace}
@@ -230,6 +233,10 @@ function App() {
           onLoadPastedJson={loadJsonFromText}
           onClose={() => setIsLoadModalOpen(false)}
         />
+      ) : null}
+
+      {isSourceInspectionOpen ? (
+        <SourceInspectionPanel onClose={() => setIsSourceInspectionOpen(false)} />
       ) : null}
     </main>
   )
