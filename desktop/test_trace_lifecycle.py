@@ -10,6 +10,8 @@ from typing import Any
 from desktop.host import DesktopTraceApi, TraceRunManager
 from desktop.trace_protocol import PROTOCOL_VERSION
 
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
+
 
 def success_message(run_id: str) -> dict[str, Any]:
     return {
@@ -18,7 +20,7 @@ def success_message(run_id: str) -> dict[str, Any]:
         "run_id": run_id,
         "trace": {
             "transfer": "inline",
-            "payload": {"graph": {"nodes": [], "edges": []}},
+            "payload": {"model_name": "TestModel", "graph": {"nodes": [], "edges": []}},
         },
         "warnings": [],
     }
@@ -38,6 +40,15 @@ def wait_for_active_run(manager: TraceRunManager) -> None:
 
 
 class TraceRunManagerTests(unittest.TestCase):
+    def test_shared_success_fixture_matches_host_protocol(self):
+        fixture = json.loads((FIXTURE_ROOT / "trace_protocol_success.json").read_text(encoding="utf-8"))
+        code = f"import json; print(json.dumps({fixture!r}))"
+        manager = TraceRunManager(worker_command_factory=worker_command(code))
+
+        result = manager.run_known_model_trace("fixture-run")
+
+        self.assertEqual(result, fixture)
+
     def test_success_result_is_returned(self):
         code = (
             "import json, sys; "
@@ -145,6 +156,126 @@ class TraceRunManagerTests(unittest.TestCase):
         thread.join(timeout=3)
 
         self.assertEqual(result["error"]["code"], "duplicate_run_request")
+
+    def test_simultaneous_requests_launch_only_one_worker(self):
+        launch_count = 0
+        launch_lock = threading.Lock()
+        start_barrier = threading.Barrier(3)
+
+        def counted_worker(request_path: Path):
+            nonlocal launch_count
+            with launch_lock:
+                launch_count += 1
+            return worker_command("import time; time.sleep(10)")(request_path)
+
+        manager = TraceRunManager(worker_command_factory=counted_worker)
+        results: list[dict[str, Any]] = []
+
+        def run(run_id: str):
+            start_barrier.wait()
+            results.append(manager.run_known_model_trace(run_id))
+
+        threads = [threading.Thread(target=run, args=(f"run-{index}",)) for index in range(2)]
+        for thread in threads:
+            thread.start()
+        start_barrier.wait()
+        wait_for_active_run(manager)
+        active_run_id = next(iter(manager._active_runs))
+        manager.cancel_trace(active_run_id)
+        for thread in threads:
+            thread.join(timeout=3)
+
+        self.assertEqual(launch_count, 1)
+        self.assertEqual(sum(result["error"]["code"] == "duplicate_run_request" for result in results), 1)
+
+    def test_failed_startup_releases_reservation(self):
+        attempts = 0
+
+        def failing_worker(_request_path: Path):
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("startup failed")
+
+        manager = TraceRunManager(worker_command_factory=failing_worker)
+
+        first = manager.run_known_model_trace("run-start-failure")
+        second = manager.run_known_model_trace("run-start-retry")
+
+        self.assertEqual(first["error"]["code"], "worker_start_failed")
+        self.assertEqual(second["error"]["code"], "worker_start_failed")
+        self.assertEqual(attempts, 2)
+        self.assertEqual(manager._active_runs, {})
+
+    def test_cancel_starting_reservation_prevents_worker_launch(self):
+        setup_started = threading.Event()
+        allow_setup = threading.Event()
+        launch_count = 0
+        original_temp_directory = tempfile.TemporaryDirectory
+
+        class BlockingTempDirectory:
+            def __init__(self, *args, **kwargs):
+                self._temp_dir = original_temp_directory(*args, **kwargs)
+                self.name = self._temp_dir.name
+                setup_started.set()
+                allow_setup.wait(timeout=2)
+
+            def cleanup(self):
+                self._temp_dir.cleanup()
+
+        def counted_worker(request_path: Path):
+            nonlocal launch_count
+            launch_count += 1
+            return worker_command("")(request_path)
+
+        manager = TraceRunManager(worker_command_factory=counted_worker)
+        result: dict[str, Any] = {}
+        tempfile.TemporaryDirectory = BlockingTempDirectory
+        try:
+            thread = threading.Thread(target=lambda: result.update(manager.run_known_model_trace("run-starting")))
+            thread.start()
+            self.assertTrue(setup_started.wait(timeout=2))
+            cancel_result = manager.cancel_trace("run-starting")
+            allow_setup.set()
+            thread.join(timeout=3)
+        finally:
+            tempfile.TemporaryDirectory = original_temp_directory
+
+        self.assertEqual(cancel_result["error"]["code"], "cancelled")
+        self.assertEqual(result["error"]["code"], "cancelled")
+        self.assertEqual(launch_count, 0)
+
+    def test_protocol_rejects_unsupported_transfer(self):
+        message = success_message("run-transfer")
+        message["trace"] = {"transfer": "socket"}
+        code = f"import json; print(json.dumps({message!r}))"
+        manager = TraceRunManager(worker_command_factory=worker_command(code))
+
+        result = manager.run_known_model_trace("run-transfer")
+
+        self.assertEqual(result["error"]["code"], "worker_protocol_error")
+        self.assertIn("unsupported transfer", result["error"]["title"].lower())
+
+    def test_protocol_rejects_incomplete_inline_and_file_transfers(self):
+        for transfer in ({"transfer": "inline"}, {"transfer": "file"}):
+            with self.subTest(transfer=transfer["transfer"]):
+                message = success_message(f"run-{transfer['transfer']}")
+                message["trace"] = transfer
+                code = f"import json; print(json.dumps({message!r}))"
+                manager = TraceRunManager(worker_command_factory=worker_command(code))
+
+                result = manager.run_known_model_trace(message["run_id"])
+
+                self.assertEqual(result["error"]["code"], "worker_protocol_error")
+
+    def test_protocol_rejects_non_string_warning(self):
+        message = success_message("run-warning")
+        message["warnings"] = [123]
+        code = f"import json; print(json.dumps({message!r}))"
+        manager = TraceRunManager(worker_command_factory=worker_command(code))
+
+        result = manager.run_known_model_trace("run-warning")
+
+        self.assertEqual(result["error"]["code"], "worker_protocol_error")
 
     def test_temp_files_are_cleaned_up(self):
         code = (

@@ -1,9 +1,5 @@
-import type { TracePayload } from './types'
+import { validateTracePayload } from './validateTracePayload'
 
 export function parseTraceJson(text: string) {
-  const payload = JSON.parse(text) as TracePayload
-  if (!payload.graph?.nodes || !payload.graph?.edges) {
-    throw new Error('JSON must include graph.nodes and graph.edges.')
-  }
-  return payload
+  return validateTracePayload(JSON.parse(text) as unknown)
 }

@@ -3,6 +3,7 @@ import { loadStoredPositions, saveStoredPositions } from '../graph/layoutStorage
 import type { LayoutPositions } from '../graph/layoutStorage'
 import { parseTraceJson } from './parseTraceJson'
 import type { TracePayload } from './types'
+import { validateTracePayload } from './validateTracePayload'
 
 export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void }) {
   const [trace, setTrace] = useState<TracePayload | null>(null)
@@ -12,7 +13,8 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
   const [loadError, setLoadError] = useState<string | null>(null)
   const [layoutPositions, setLayoutPositions] = useState<LayoutPositions>({})
 
-  const applyTracePayload = useCallback((payload: TracePayload) => {
+  const applyTracePayload = useCallback((value: unknown) => {
+    const payload = validateTracePayload(value)
     setTrace(payload)
     setLayoutPositions(loadStoredPositions(payload))
     setError(null)
@@ -24,10 +26,10 @@ export function useTraceLoader({ onTraceApplied }: { onTraceApplied: () => void 
     fetch('/branchy.json')
       .then((response) => {
         if (!response.ok) throw new Error(`Unable to load trace JSON (${response.status})`)
-        return response.json() as Promise<TracePayload>
+        return response.text()
       })
-      .then((payload) => {
-        applyTracePayload(payload)
+      .then((text) => {
+        applyTracePayload(parseTraceJson(text))
       })
       .catch((loadError: Error) => setError(loadError.message))
   }, [applyTracePayload])

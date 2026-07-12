@@ -36,3 +36,4 @@ frontend/README.md
 frontend/src/assets
 *.md
 scripts/
+tests/

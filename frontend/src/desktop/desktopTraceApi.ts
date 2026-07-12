@@ -1,8 +1,9 @@
 import type { TracePayload } from '../trace/types'
+import { validateTracePayload } from '../trace/validateTracePayload'
 
 const protocolVersion = 1
 
-export type TraceRunState = 'idle' | 'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
+export type TraceRunState = 'idle' | 'starting' | 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out'
 
 type TraceTransfer =
   | { transfer: 'inline'; payload: TracePayload }
@@ -48,13 +49,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function isTracePayload(value: unknown): value is TracePayload {
-  return isRecord(value)
-    && isRecord(value.graph)
-    && Array.isArray(value.graph.nodes)
-    && Array.isArray(value.graph.edges)
-}
-
 function normalizeError(value: unknown): TraceWorkerError {
   if (!isRecord(value)) {
     return {
@@ -93,12 +87,28 @@ function parseRunTraceResponse(value: unknown): RunTraceResponse {
   if (value.type === 'success' && isRecord(value.trace)) {
     const transfer = value.trace.transfer
     const payload = value.trace.payload
-    if (transfer === 'inline' && isTracePayload(payload)) {
+    if (transfer === 'inline') {
+      let validatedPayload: TracePayload
+      try {
+        validatedPayload = validateTracePayload(payload)
+      } catch (error) {
+        return {
+          protocol_version: protocolVersion,
+          type: 'error',
+          run_id: typeof value.run_id === 'string' ? value.run_id : null,
+          error: {
+            code: 'desktop_bridge_protocol_error',
+            title: 'Invalid trace payload',
+            message: error instanceof Error ? error.message : 'The desktop bridge returned an invalid trace payload.',
+            stage: 'desktop_bridge',
+          },
+        }
+      }
       return {
         protocol_version: protocolVersion,
         type: 'success',
         run_id: typeof value.run_id === 'string' ? value.run_id : '',
-        trace: { transfer, payload },
+        trace: { transfer, payload: validatedPayload },
         warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === 'string') : [],
       }
     }

@@ -19,6 +19,7 @@ function App() {
   const [theme] = useState<'light' | 'dark'>('light')
   const [desktopTraceState, setDesktopTraceState] = useState<TraceRunState>('idle')
   const activeDesktopRunId = useRef<string | null>(null)
+  const cancellingDesktopRunId = useRef<string | null>(null)
   const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
   const [isSourceInspectionOpen, setIsSourceInspectionOpen] = useState(false)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
@@ -123,7 +124,7 @@ function App() {
 
     runKnownModelTrace(runId)
       .then((result) => {
-        if (activeDesktopRunId.current !== runId) return
+        if (activeDesktopRunId.current !== runId || cancellingDesktopRunId.current === runId) return
 
         if (result.type === 'success') {
           if (result.trace.transfer === 'inline') {
@@ -140,29 +141,42 @@ function App() {
         setDesktopTraceState(traceStateFromErrorCode(result.error.code))
       })
       .catch((traceError: unknown) => {
-        if (activeDesktopRunId.current !== runId) return
+        if (activeDesktopRunId.current !== runId || cancellingDesktopRunId.current === runId) return
         setDesktopTraceError(traceError instanceof Error ? traceError.message : 'Desktop trace failed.')
         setDesktopTraceState('failed')
       })
       .finally(() => {
-        if (activeDesktopRunId.current === runId) {
+        if (activeDesktopRunId.current === runId && cancellingDesktopRunId.current !== runId) {
           activeDesktopRunId.current = null
         }
       })
   }
 
-  function cancelDesktopTrace() {
+  async function cancelDesktopTrace() {
     const runId = activeDesktopRunId.current
-    if (!runId) return
+    if (!runId || cancellingDesktopRunId.current === runId) return
 
-    cancelTrace(runId).then((result) => {
+    cancellingDesktopRunId.current = runId
+    setDesktopTraceError(null)
+    setDesktopTraceState('cancelling')
+    try {
+      const result = await cancelTrace(runId)
       if (activeDesktopRunId.current !== runId) return
       if (result.type === 'error') {
         setDesktopTraceError(result.error.message)
         setDesktopTraceState(traceStateFromErrorCode(result.error.code))
+      } else {
+        setDesktopTraceError('The desktop bridge returned an unexpected success response to cancellation.')
+        setDesktopTraceState('failed')
       }
-      activeDesktopRunId.current = null
-    })
+    } catch (cancelError: unknown) {
+      if (activeDesktopRunId.current !== runId) return
+      setDesktopTraceError(cancelError instanceof Error ? cancelError.message : 'Desktop trace cancellation failed.')
+      setDesktopTraceState('failed')
+    } finally {
+      if (activeDesktopRunId.current === runId) activeDesktopRunId.current = null
+      if (cancellingDesktopRunId.current === runId) cancellingDesktopRunId.current = null
+    }
   }
 
   if (error) return <main className={`app-shell ${theme} app-shell--message`}>{error}</main>

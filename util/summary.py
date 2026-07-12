@@ -81,8 +81,8 @@ def model_summary(
 
             params = module_params_summary(mod)
 
-            target = str(node.target)
-            module_reuse_count = module_target_counts.get(target, 1)
+            module_path = str(node.target)
+            module_reuse_count = module_target_counts.get(module_path, 1)
             module_reused = module_reuse_count > 1
 
         else:
@@ -111,20 +111,6 @@ def model_summary(
             info["params"] = params
 
         attrs = {}
-
-        if node.op == "call_module":
-            mod = gm.get_submodule(str(node.target))
-            mod_type = type(mod).__name__
-            label = mod_type
-
-            params = module_params_summary(mod)
-
-            module_path = str(node.target)
-            module_reuse_count = module_target_counts.get(module_path, 1)
-            module_reused = module_reuse_count > 1
-
-        else:
-            label = target_name(node.target)
 
         if mod is not None:
             attrs.update(module_attrs(mod))

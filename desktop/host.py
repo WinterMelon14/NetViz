@@ -21,10 +21,10 @@ WorkerCommandFactory = Callable[[Path], list[str]]
 @dataclass
 class ActiveTraceRun:
     run_id: str
-    process: subprocess.Popen[str]
-    temp_dir: tempfile.TemporaryDirectory[str]
-    request_path: Path
-    output_path: Path
+    process: subprocess.Popen[str] | None = None
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
+    request_path: Path | None = None
+    output_path: Path | None = None
     cancel_requested: bool = False
 
 
@@ -78,33 +78,53 @@ class TraceRunManager:
                     "host_lifecycle",
                     {"active_run_ids": list(self._active_runs.keys())},
                 )
-
-        temp_dir = tempfile.TemporaryDirectory(prefix="tensor-trace-run-", dir=self.temp_root)
-        request_path = Path(temp_dir.name) / "request.json"
-        output_path = Path(temp_dir.name) / "result.json"
-        request_path.write_text(
-            json.dumps(
-                {
-                    "protocol_version": PROTOCOL_VERSION,
-                    "run_id": active_run_id,
-                    "model": "desktop.known_model.TestModel",
-                    "input": "torch.randn(1, 4)",
-                    "output_path": str(output_path),
-                }
-            ),
-            encoding="utf-8",
-        )
+            active_run = ActiveTraceRun(active_run_id)
+            self._active_runs[active_run_id] = active_run
 
         try:
-            process = subprocess.Popen(
-                self.worker_command_factory(request_path),
-                cwd=REPO_ROOT,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+            temp_dir = tempfile.TemporaryDirectory(prefix="tensor-trace-run-", dir=self.temp_root)
+            request_path = Path(temp_dir.name) / "request.json"
+            output_path = Path(temp_dir.name) / "result.json"
+            active_run.temp_dir = temp_dir
+            active_run.request_path = request_path
+            active_run.output_path = output_path
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "protocol_version": PROTOCOL_VERSION,
+                        "run_id": active_run_id,
+                        "model": "desktop.known_model.TestModel",
+                        "input": "torch.randn(1, 4)",
+                        "output_path": str(output_path),
+                    }
+                ),
+                encoding="utf-8",
             )
+
+            with self._lock:
+                if active_run.cancel_requested:
+                    self._active_runs.pop(active_run_id, None)
+                    temp_dir.cleanup()
+                    return trace_error(
+                        active_run_id,
+                        "cancelled",
+                        "Trace cancelled",
+                        "The trace run was cancelled before its worker started.",
+                        "worker_cancelled",
+                    )
+                process = subprocess.Popen(
+                    self.worker_command_factory(request_path),
+                    cwd=REPO_ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                active_run.process = process
         except Exception as exc:
-            temp_dir.cleanup()
+            with self._lock:
+                self._active_runs.pop(active_run_id, None)
+            if active_run.temp_dir:
+                active_run.temp_dir.cleanup()
             return trace_error(
                 active_run_id,
                 "worker_start_failed",
@@ -113,10 +133,6 @@ class TraceRunManager:
                 "host_lifecycle",
                 exc=exc,
             )
-
-        active_run = ActiveTraceRun(active_run_id, process, temp_dir, request_path, output_path)
-        with self._lock:
-            self._active_runs[active_run_id] = active_run
 
         try:
             stdout, stderr = process.communicate(timeout=self.timeout_seconds)
@@ -135,7 +151,8 @@ class TraceRunManager:
             with self._lock:
                 removed_run = self._active_runs.pop(active_run_id, None)
             cancelled = bool(removed_run and removed_run.cancel_requested)
-            active_run.temp_dir.cleanup()
+            if active_run.temp_dir:
+                active_run.temp_dir.cleanup()
 
         if cancelled:
             return trace_error(
@@ -172,7 +189,8 @@ class TraceRunManager:
             active_run.cancel_requested = True
             process = active_run.process
 
-        terminate_process(process)
+        if process is not None:
+            terminate_process(process)
         return trace_error(
             run_id,
             "cancelled",

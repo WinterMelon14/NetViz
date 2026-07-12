@@ -19,10 +19,10 @@ export function Topbar({
   desktopTraceState: TraceRunState
   desktopTraceError: string | null
 }) {
-  const isTraceActive = desktopTraceState === 'starting' || desktopTraceState === 'running'
+  const isTraceActive = desktopTraceState === 'starting' || desktopTraceState === 'running' || desktopTraceState === 'cancelling'
   const shouldShowRetry = desktopTraceState === 'failed' || desktopTraceState === 'cancelled' || desktopTraceState === 'timed_out'
   const runLabel = isTraceActive
-    ? desktopTraceState === 'starting' ? 'Starting Trace...' : 'Running Trace...'
+    ? desktopTraceState === 'starting' ? 'Starting Trace...' : desktopTraceState === 'cancelling' ? 'Cancelling Trace...' : 'Running Trace...'
     : shouldShowRetry ? 'Retry Desktop Trace' : 'Run Desktop Trace Spike'
 
   return (
@@ -37,7 +37,7 @@ export function Topbar({
         <button type="button" onClick={onRunDesktopTrace} disabled={isTraceActive}>
           {runLabel}
         </button>
-        {isTraceActive ? <button type="button" onClick={onCancelDesktopTrace}>Cancel</button> : null}
+        {isTraceActive ? <button type="button" onClick={onCancelDesktopTrace} disabled={desktopTraceState === 'cancelling'}>Cancel</button> : null}
         {desktopTraceState !== 'idle' ? <span className="toolbar-status">{desktopTraceState}</span> : null}
         {desktopTraceError ? <span className="toolbar-error">{desktopTraceError}</span> : null}
         <button type="button" onClick={onFitGraph}><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 32 32">
