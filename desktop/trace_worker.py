@@ -8,7 +8,7 @@ from desktop.user_model_runtime import (
     UserTraceRuntimeError,
     build_tensor_inputs,
     instantiate_model,
-    load_user_module,
+    load_sanitized_user_module,
 )
 from desktop.user_trace_request import UserTraceRequestError, validate_user_trace_request
 from desktop.trace_protocol import (
@@ -89,18 +89,23 @@ def run_trace(request_path: str | None = None):
         )
 
     try:
-        module = load_user_module(
+        with load_sanitized_user_module(
             request["source"]["file_path"],
             run_id,
             request["source"]["content_sha256"],
-        )
-        model = instantiate_model(
-            module,
-            request["source"]["class_name"],
-            request["constructor"]["args"],
-            request["constructor"]["kwargs"],
-        )
-        example_inputs = build_tensor_inputs(request["inputs"])
+            Path(request_path).parent,
+        ) as module:
+            model = instantiate_model(
+                module,
+                request["source"]["class_name"],
+                request["constructor"]["args"],
+                request["constructor"]["kwargs"],
+            )
+            example_inputs = build_tensor_inputs(request["inputs"])
+            from util.summary import model_summary
+
+            payload = model_summary(model, *example_inputs, run_shape_prop=False)
+            return trace_success_for_transport(run_id, payload, request.get("output_path"))
     except UserTraceRuntimeError as exc:
         return trace_error(
             run_id,
@@ -111,12 +116,6 @@ def run_trace(request_path: str | None = None):
             exc.details,
             exc,
         )
-
-    try:
-        from util.summary import model_summary
-
-        payload = model_summary(model, *example_inputs, run_shape_prop=False)
-        return trace_success_for_transport(run_id, payload, request.get("output_path"))
     except Exception as exc:
         print(traceback.format_exc(), file=sys.stderr)
         return trace_error(

@@ -17,6 +17,7 @@ from desktop.user_model_runtime import (
     build_tensor_inputs,
     instantiate_model,
     load_user_module,
+    sanitize_user_source,
 )
 
 
@@ -156,6 +157,45 @@ class UserTraceRuntimeTests(unittest.TestCase):
         self.assertEqual(result["trace"]["transfer"], "inline")
         self.assertEqual(result["trace"]["payload"]["model_name"], "UserModel")
 
+    def test_worker_suppresses_unrelated_top_level_calls(self):
+        sentinel = self.root / "top-level-executed.txt"
+        self.source_path.write_text(
+            '"""Model fixture docstring."""\n'
+            "from pathlib import Path\n"
+            "import torch\n"
+            "CONFIG = 2\n"
+            "def scale(x): return x * CONFIG\n"
+            "class UserModel(torch.nn.Module):\n"
+            "    def forward(self, x): return scale(x)\n"
+            "class Unrelated(torch.nn.Module): pass\n"
+            "model = Unrelated(d_model=4)\n"
+            f"Path({str(sentinel)!r}).write_text('executed')\n",
+            encoding="utf-8",
+        )
+
+        result = run_trace(str(self.write_request(self.worker_request("sanitized-source"))))
+
+        self.assertEqual(result["type"], "success")
+        self.assertFalse(sentinel.exists())
+        self.assertEqual(list(self.root.glob("sanitized-model-*.py")), [])
+
+    def test_sanitizer_preserves_lines_and_non_call_configuration(self):
+        source = (
+            '"""docs"""\n'
+            "VALUE = 4\n"
+            "created = object()\n"
+            "print('side effect')\n"
+            "class Model: pass\n"
+        )
+
+        sanitized = sanitize_user_source(source)
+
+        self.assertEqual(len(sanitized.splitlines()), len(source.splitlines()))
+        self.assertIn("VALUE = 4", sanitized)
+        self.assertIn("class Model: pass", sanitized)
+        self.assertNotIn("object()", sanitized)
+        self.assertNotIn("print(", sanitized)
+
     def test_self_contained_file_uses_file_backed_transport(self):
         with patch("desktop.trace_worker.MAX_INLINE_TRACE_BYTES", 1):
             result = run_trace(str(self.write_request(self.worker_request("file-user"))))
@@ -168,7 +208,13 @@ class UserTraceRuntimeTests(unittest.TestCase):
         success = manager.run_user_trace(self.bridge_request())
         self.assertEqual(success["type"], "success")
 
-        self.source_path.write_text("import os\nos._exit(9)\n", encoding="utf-8")
+        self.source_path.write_text(
+            "import os\n"
+            "def crash_worker(selected_class): os._exit(9)\n"
+            "@crash_worker\n"
+            "class UserModel: pass\n",
+            encoding="utf-8",
+        )
         crashed = manager.run_user_trace(self.bridge_request("crash-user"))
         self.assertEqual(crashed["error"]["code"], "worker_crashed")
 
@@ -246,7 +292,7 @@ class UserTraceRuntimeTests(unittest.TestCase):
                 self.assertEqual(result["error"]["code"], "cancelled")
 
     def test_worker_error_preserves_failure_stage(self):
-        self.source_path.write_text("raise RuntimeError('import broke')\n", encoding="utf-8")
+        self.source_path.write_text("import tensor_trace_missing_test_module\n", encoding="utf-8")
         result = run_trace(str(self.write_request(self.worker_request())))
         self.assertEqual(result["error"]["code"], "module_import_failed")
         self.assertEqual(result["error"]["stage"], "module_import")

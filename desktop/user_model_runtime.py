@@ -1,6 +1,9 @@
+import ast
 import importlib.util
 import hashlib
 import inspect
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -22,6 +25,93 @@ class UserTraceRuntimeError(RuntimeError):
         self.message = message
         self.stage = stage
         self.details = details or {}
+
+
+def _contains_call(node: ast.AST) -> bool:
+    return any(isinstance(child, ast.Call) for child in ast.walk(node))
+
+
+def _keep_top_level_statement(node: ast.stmt, index: int) -> bool:
+    if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return True
+    if isinstance(node, ast.Expr):
+        return index == 0 and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        value = node.value
+        return value is not None and not _contains_call(value)
+    return False
+
+
+def sanitize_user_source(source_text: str) -> str:
+    """Suppress unrelated top-level execution while preserving source line numbers."""
+    tree = ast.parse(source_text)
+    lines = source_text.splitlines(keepends=True)
+    for index, node in enumerate(tree.body):
+        if _keep_top_level_statement(node, index):
+            continue
+        start = node.lineno - 1
+        end = (node.end_lineno or node.lineno) - 1
+        first_ending = "\r\n" if lines[start].endswith("\r\n") else "\n" if lines[start].endswith("\n") else ""
+        lines[start] = f"pass{first_ending}"
+        for line_index in range(start + 1, end + 1):
+            ending = "\r\n" if lines[line_index].endswith("\r\n") else "\n" if lines[line_index].endswith("\n") else ""
+            lines[line_index] = ending
+    return "".join(lines)
+
+
+def _verify_source_hash(path: Path, expected_sha256: str, message: str) -> None:
+    actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise UserTraceRuntimeError(
+            "source_changed",
+            "Model source changed",
+            message,
+            "source_identity",
+            {"expected_sha256": expected_sha256, "actual_sha256": actual_sha256},
+        )
+
+
+@contextmanager
+def load_sanitized_user_module(file_path: str, run_id: str, expected_sha256: str, working_directory: Path):
+    source_path = Path(file_path)
+    sanitized_path = working_directory / f"sanitized-model-{uuid4().hex}.py"
+
+    def remove_sanitized_source() -> None:
+        try:
+            sanitized_path.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Could not remove sanitized model source {sanitized_path}: {exc}", file=sys.stderr)
+
+    try:
+        _verify_source_hash(
+            source_path,
+            expected_sha256,
+            "The Python file differs from the inspected version. Inspect it again before tracing.",
+        )
+        sanitized_path.write_text(sanitize_user_source(source_path.read_text(encoding="utf-8")), encoding="utf-8")
+        module = load_user_module(str(sanitized_path), run_id, hashlib.sha256(sanitized_path.read_bytes()).hexdigest())
+        _verify_source_hash(
+            source_path,
+            expected_sha256,
+            "The Python file changed while it was being imported. Inspect it again before tracing.",
+        )
+    except UserTraceRuntimeError:
+        remove_sanitized_source()
+        raise
+    except BaseException as exc:
+        remove_sanitized_source()
+        raise UserTraceRuntimeError(
+            "module_import_failed",
+            "Model file could not be imported",
+            str(exc) or type(exc).__name__,
+            "module_import",
+            {"file_path": str(source_path)},
+        ) from exc
+
+    try:
+        yield module
+    finally:
+        remove_sanitized_source()
 
 
 def load_user_module(file_path: str, run_id: str, expected_sha256: str) -> ModuleType:
