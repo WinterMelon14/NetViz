@@ -4,7 +4,7 @@ import { Topbar } from './app/Topbar'
 import { EmptyTraceState } from './app/EmptyTraceState'
 import { TraceRecovery } from './app/TraceRecovery'
 import { getTraceViewState } from './app/traceViewState'
-import { cancelTrace, consumeTraceFile, createTraceRunId, runSelectedUserTrace, type RunTraceResponse, type TraceRunState } from './desktop/desktopTraceApi'
+import { cancelTrace, consumeTraceFile, createTraceRunId, runSelectedUserTrace, type RunTraceResponse, type TraceRunState, type TraceWorkerError } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -15,6 +15,7 @@ import { TraceLoadDialog } from './trace/TraceLoadDialog'
 import { useTraceLoader } from './trace/useTraceLoader'
 import { UserTracePanel } from './userTrace/UserTracePanel'
 import type { UserTraceDraft } from './userTrace/UserTracePanel'
+import type { TraceFailure } from './userTrace/traceErrorDetails'
 
 function App() {
   const inspectorRef = useRef<HTMLElement | null>(null)
@@ -24,7 +25,7 @@ function App() {
   const [desktopTraceState, setDesktopTraceState] = useState<TraceRunState>('idle')
   const activeDesktopRunId = useRef<string | null>(null)
   const cancellingDesktopRunId = useRef<string | null>(null)
-  const [desktopTraceError, setDesktopTraceError] = useState<string | null>(null)
+  const [desktopTraceFailure, setDesktopTraceFailure] = useState<TraceFailure | null>(null)
   const [isUserTraceOpen, setIsUserTraceOpen] = useState(false)
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
@@ -120,7 +121,7 @@ function App() {
 
     const runId = createTraceRunId()
     activeDesktopRunId.current = runId
-    setDesktopTraceError(null)
+    setDesktopTraceFailure(null)
     setDesktopTraceState('starting')
     window.setTimeout(() => {
       if (activeDesktopRunId.current === runId) {
@@ -143,12 +144,18 @@ function App() {
           return
         }
 
-        setDesktopTraceError(result.error.message)
+        setDesktopTraceFailure({ runId: result.run_id ?? runId, error: result.error })
         setDesktopTraceState(traceStateFromErrorCode(result.error.code))
       })
       .catch((traceError: unknown) => {
         if (activeDesktopRunId.current !== runId || cancellingDesktopRunId.current === runId) return
-        setDesktopTraceError(traceError instanceof Error ? traceError.message : 'Desktop trace failed.')
+        const error: TraceWorkerError = {
+          code: 'desktop_trace_failed',
+          title: 'Desktop trace failed',
+          message: traceError instanceof Error ? traceError.message : 'Desktop trace failed.',
+          stage: 'desktop_bridge',
+        }
+        setDesktopTraceFailure({ runId, error })
         setDesktopTraceState('failed')
       })
       .finally(() => {
@@ -170,21 +177,37 @@ function App() {
     if (!runId || cancellingDesktopRunId.current === runId) return
 
     cancellingDesktopRunId.current = runId
-    setDesktopTraceError(null)
+    setDesktopTraceFailure(null)
     setDesktopTraceState('cancelling')
     try {
       const result = await cancelTrace(runId)
       if (activeDesktopRunId.current !== runId) return
       if (result.type === 'error') {
-        setDesktopTraceError(result.error.message)
+        setDesktopTraceFailure({ runId: result.run_id ?? runId, error: result.error })
         setDesktopTraceState(traceStateFromErrorCode(result.error.code))
       } else {
-        setDesktopTraceError('The desktop bridge returned an unexpected success response to cancellation.')
+        setDesktopTraceFailure({
+          runId,
+          error: {
+            code: 'desktop_bridge_protocol_error',
+            title: 'Cancellation failed',
+            message: 'The desktop bridge returned an unexpected success response to cancellation.',
+            stage: 'desktop_bridge',
+          },
+        })
         setDesktopTraceState('failed')
       }
     } catch (cancelError: unknown) {
       if (activeDesktopRunId.current !== runId) return
-      setDesktopTraceError(cancelError instanceof Error ? cancelError.message : 'Desktop trace cancellation failed.')
+      setDesktopTraceFailure({
+        runId,
+        error: {
+          code: 'desktop_bridge_unavailable',
+          title: 'Cancellation failed',
+          message: cancelError instanceof Error ? cancelError.message : 'Desktop trace cancellation failed.',
+          stage: 'desktop_bridge',
+        },
+      })
       setDesktopTraceState('failed')
     } finally {
       if (activeDesktopRunId.current === runId) activeDesktopRunId.current = null
@@ -193,10 +216,18 @@ function App() {
   }
 
   function clearDesktopTraceError() {
-    setDesktopTraceError(null)
+    setDesktopTraceFailure(null)
     setDesktopTraceState((current) => (
       current === 'failed' || current === 'cancelled' || current === 'timed_out' ? 'idle' : current
     ))
+  }
+
+  function openUserTrace() {
+    setDesktopTraceFailure(null)
+    setDesktopTraceState((current) => (
+      current === 'succeeded' || current === 'failed' || current === 'cancelled' || current === 'timed_out' ? 'idle' : current
+    ))
+    setIsUserTraceOpen(true)
   }
 
   const openFixtureLoader = import.meta.env.DEV ? () => setIsLoadModalOpen(true) : undefined
@@ -210,7 +241,7 @@ function App() {
   const tracePanel = isUserTraceOpen ? (
     <UserTracePanel
       traceState={desktopTraceState}
-      traceError={desktopTraceError}
+      traceFailure={desktopTraceFailure}
       onRun={runSelectedModelTrace}
       onCancel={cancelDesktopTrace}
       onClearError={clearDesktopTraceError}
@@ -232,7 +263,7 @@ function App() {
     <main className={`app-shell ${theme} app-shell--recovery`}>
       <TraceRecovery
         message={recoveryError}
-        onTraceModel={() => setIsUserTraceOpen(true)}
+        onTraceModel={openUserTrace}
         onLoadFixture={openFixtureLoader}
       />
       {fixtureDialog}
@@ -240,7 +271,7 @@ function App() {
     </main>
   )
   if (viewState === 'empty') return (
-    <EmptyTraceState onTraceModel={() => setIsUserTraceOpen(true)} onLoadFixture={openFixtureLoader}>
+    <EmptyTraceState onTraceModel={openUserTrace} onLoadFixture={openFixtureLoader}>
       {fixtureDialog}
       {tracePanel}
     </EmptyTraceState>
@@ -256,7 +287,7 @@ function App() {
     <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
       <Topbar
         modelName={trace.model_name}
-        onOpenUserTrace={() => setIsUserTraceOpen(true)}
+        onOpenUserTrace={openUserTrace}
         onFitGraph={resetGraphPositions}
         onLoadFixture={openFixtureLoader}
       />

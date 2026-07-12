@@ -960,6 +960,129 @@ code {
   justify-content: flex-end;
 }
 
+.trace-progress {
+  min-height: 320px;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  place-items: center;
+  align-content: center;
+  gap: 22px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.trace-progress > div {
+  display: grid;
+  gap: 6px;
+}
+
+.trace-progress h3 {
+  color: var(--text-strong);
+  font-size: 18px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.trace-progress p {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.trace-progress span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.loading-indicator {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+}
+
+.loading-indicator > span {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: trace-spin 900ms linear infinite;
+}
+
+.trace-error-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.trace-error-card > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.trace-error-card h3 {
+  color: var(--text-strong);
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.trace-error-card p:not(.eyebrow) {
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.trace-error-card > div:first-child > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.trace-error-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trace-error-details {
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.trace-error-details summary {
+  color: var(--text-strong);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trace-error-details pre {
+  max-height: 220px;
+  margin: 10px 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--textarea);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.trace-error-details > span {
+  margin-left: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .user-trace-section {
   display: grid;
   gap: 10px;
@@ -1272,6 +1395,19 @@ select {
 @keyframes edge-streak {
   to {
     stroke-dashoffset: -42;
+  }
+}
+
+@keyframes trace-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-indicator > span {
+    animation: none;
+    border-color: var(--accent);
   }
 }
 

@@ -8,6 +8,9 @@ import { MAX_TENSOR_DIMENSIONS } from '../desktop/userTraceRequest.ts'
 import { buildConstructorConfig, initialConstructorFields, type ConstructorFieldState } from './constructorConfig.ts'
 import { TRUSTED_SOURCE_STORAGE_PREFIX } from './constants.ts'
 import { formatBytes, validateTensorDimensions } from './inputConfig.ts'
+import { LoadingIndicator } from '../components/LoadingIndicator.tsx'
+import { TraceErrorCard } from './TraceErrorCard.tsx'
+import type { TraceFailure } from './traceErrorDetails.ts'
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
 
@@ -34,14 +37,14 @@ function rememberTrust(contentSha256: string) {
 
 export function UserTracePanel({
   traceState,
-  traceError,
+  traceFailure,
   onRun,
   onCancel,
   onClearError,
   onClose,
 }: {
   traceState: TraceRunState
-  traceError: string | null
+  traceFailure: TraceFailure | null
   onRun: (request: UserTraceDraft) => void
   onCancel: () => void
   onClearError: () => void
@@ -59,7 +62,12 @@ export function UserTracePanel({
   const requestIdRef = useRef(0)
   const mountedRef = useRef(true)
   const inputValidation = validateTensorDimensions(dimensions)
-  const selectedCandidate = inspection?.candidates.find((candidate) => candidate.className === selectedClass) ?? null
+  const failureCode = traceFailure?.error.code
+  const isSourceInvalidated = failureCode === 'source_changed' || failureCode === 'source_reinspection_required'
+  const isSelectionInvalidated = failureCode === 'selected_file_unavailable'
+  const activeSelectedFile = isSelectionInvalidated ? null : selectedFile
+  const activeInspection = isSourceInvalidated || isSelectionInvalidated ? null : inspection
+  const selectedCandidate = activeInspection?.candidates.find((candidate) => candidate.className === selectedClass) ?? null
   const constructorValidation = buildConstructorConfig(selectedCandidate?.constructor.parameters ?? [], constructorFields)
   const isTraceActive = traceState === 'starting' || traceState === 'running' || traceState === 'cancelling'
 
@@ -73,6 +81,7 @@ export function UserTracePanel({
 
   async function chooseFile() {
     if (isSelecting || isTraceActive) return
+    onClearError()
     setIsSelecting(true)
     const result = await selectPythonFile()
     if (!mountedRef.current) return
@@ -111,16 +120,28 @@ export function UserTracePanel({
   }
 
   function updateDimension(index: number, value: string) {
+    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
     setDimensions((current) => current.map((dimension, currentIndex) => currentIndex === index ? value : dimension))
   }
 
+  function removeDimension() {
+    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
+    setDimensions((current) => current.slice(0, -1))
+  }
+
+  function addDimension() {
+    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
+    setDimensions((current) => [...current, '1'])
+  }
+
   function submitTrace() {
-    const sourceIdentity = inspection?.sourceIdentity
-    if (!selectedFile || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || !inputValidation.ok || !constructorValidation.ok || isTraceActive) return
+    const sourceIdentity = activeInspection?.sourceIdentity
+    if (!activeSelectedFile || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || !inputValidation.ok || !constructorValidation.ok || isTraceActive) return
+    onClearError()
     rememberTrust(sourceIdentity.contentSha256)
     onRun({
       source: {
-        selection_id: selectedFile.selectionId,
+        selection_id: activeSelectedFile.selectionId,
         class_name: selectedClass,
         content_sha256: sourceIdentity.contentSha256,
       },
@@ -135,16 +156,24 @@ export function UserTracePanel({
   }
 
   function chooseClass(candidate: ModelCandidate) {
+    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
     setSelectedClass(candidate.className)
     setConstructorFields(initialConstructorFields(candidate.constructor.parameters))
   }
 
   function updateConstructorField(name: string, update: Partial<ConstructorFieldState>) {
+    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
     setConstructorFields((current) => ({
       ...current,
       [name]: { ...current[name], enabled: current[name]?.enabled ?? false, text: current[name]?.text ?? '', ...update },
     }))
   }
+
+  const progressText = traceState === 'starting'
+    ? 'Starting trace...'
+    : traceState === 'cancelling'
+      ? 'Cancelling...'
+      : 'Tracing model...'
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -157,18 +186,32 @@ export function UserTracePanel({
           <button type="button" onClick={onClose} disabled={isTraceActive}>Close</button>
         </header>
 
+        {isTraceActive ? (
+          <section className="trace-progress" aria-busy="true" aria-live="polite">
+            <LoadingIndicator />
+            <div>
+              <h3>{selectedClass ? `Tracing ${selectedClass}` : 'Tracing model'}</h3>
+              <p>{progressText}</p>
+              <span>Executing the model locally...</span>
+            </div>
+            <button type="button" onClick={onCancel} disabled={traceState === 'cancelling'}>
+              {traceState === 'cancelling' ? 'Cancelling...' : 'Cancel'}
+            </button>
+          </section>
+        ) : (
+          <>
         <section className="user-trace-section">
           <div className="user-trace-section-heading">
             <div><span>1</span><strong>Python file</strong></div>
             <button type="button" onClick={chooseFile} disabled={isSelecting || isTraceActive}>
-              {isSelecting ? 'Opening...' : selectedFile ? 'Choose Different File' : 'Choose Python File'}
+              {isSelecting ? 'Opening...' : activeSelectedFile ? 'Choose Different File' : 'Choose Python File'}
             </button>
           </div>
-          {selectedFile ? (
+          {activeSelectedFile ? (
             <div className="selected-file-row">
-              <strong>{selectedFile.fileName}</strong>
-              <span>{formatBytes(selectedFile.sizeBytes)}</span>
-              <button type="button" disabled={isInspecting || isTraceActive} onClick={() => inspectFile(selectedFile)}>Inspect Again</button>
+              <strong>{activeSelectedFile.fileName}</strong>
+              <span>{formatBytes(activeSelectedFile.sizeBytes)}</span>
+              <button type="button" disabled={isInspecting || isTraceActive} onClick={() => inspectFile(activeSelectedFile)}>Inspect Again</button>
             </div>
           ) : <p className="source-muted">Select one local .py file. Selection does not import or execute it.</p>}
           {isInspecting ? <p className="source-muted">Inspecting source...</p> : null}
@@ -177,9 +220,9 @@ export function UserTracePanel({
 
         <section className="user-trace-section">
           <div className="user-trace-section-heading"><div><span>2</span><strong>Model class</strong></div></div>
-          {inspection?.candidates.length ? (
+          {activeInspection?.candidates.length ? (
             <div className="candidate-options">
-              {inspection.candidates.map((candidate) => {
+              {activeInspection.candidates.map((candidate) => {
                 return (
                   <label key={`${candidate.className}-${candidate.lineNumber}`}>
                     <input
@@ -196,7 +239,7 @@ export function UserTracePanel({
                 )
               })}
             </div>
-          ) : <p className="source-muted">{inspection ? 'No candidate model classes found.' : 'Choose a file to inspect model classes.'}</p>}
+          ) : <p className="source-muted">{activeInspection ? 'No candidate model classes found.' : 'Choose a file to inspect model classes.'}</p>}
         </section>
 
         <section className="user-trace-section">
@@ -235,8 +278,8 @@ export function UserTracePanel({
             {dimensions.map((dimension, index) => (
               <label key={index}>Dim {index + 1}<input type="number" min="1" step="1" value={dimension} disabled={isTraceActive} onChange={(event) => updateDimension(index, event.target.value)} /></label>
             ))}
-            <button type="button" aria-label="Remove dimension" disabled={dimensions.length === 1 || isTraceActive} onClick={() => setDimensions((current) => current.slice(0, -1))}>-</button>
-            <button type="button" aria-label="Add dimension" disabled={dimensions.length >= MAX_TENSOR_DIMENSIONS || isTraceActive} onClick={() => setDimensions((current) => [...current, '1'])}>+</button>
+            <button type="button" aria-label="Remove dimension" disabled={dimensions.length === 1 || isTraceActive} onClick={removeDimension}>-</button>
+            <button type="button" aria-label="Add dimension" disabled={dimensions.length >= MAX_TENSOR_DIMENSIONS || isTraceActive} onClick={addDimension}>+</button>
           </div>
           <div className="input-spec-summary"><span>CPU</span><span>float32</span><span>random normal</span><strong>{inputValidation.ok ? `${inputValidation.elementCount.toLocaleString()} elements · ${formatBytes(inputValidation.sizeBytes)}` : inputValidation.message}</strong></div>
         </section>
@@ -248,20 +291,35 @@ export function UserTracePanel({
             <input
               type="checkbox"
               checked={trustedCodeConfirmed}
-              disabled={!inspection?.sourceIdentity || isTraceActive}
-              onChange={(event) => setTrustedCodeConfirmed(event.target.checked)}
+              disabled={!activeInspection?.sourceIdentity || isTraceActive}
+              onChange={(event) => {
+                onClearError()
+                setTrustedCodeConfirmed(event.target.checked)
+              }}
             />
             I trust this exact inspected version and allow it to run locally.
           </label>
         </section>
 
-        {traceError ? <div className="source-error"><strong>Trace failed</strong><p>{traceError}</p></div> : null}
+        {traceFailure ? (
+          <TraceErrorCard
+            failure={traceFailure}
+            canInspectAgain={Boolean(selectedFile)}
+            onRetry={submitTrace}
+            onInspectAgain={() => {
+              if (selectedFile) void inspectFile(selectedFile)
+            }}
+            onChooseFile={() => void chooseFile()}
+            onClose={onClose}
+          />
+        ) : null}
 
         <footer>
-          {isTraceActive ? <button type="button" onClick={onCancel} disabled={traceState === 'cancelling'}>{traceState === 'cancelling' ? 'Cancelling...' : 'Cancel'}</button> : null}
           <span className="toolbar-status">{traceState !== 'idle' ? traceState : 'ready'}</span>
-          <button type="button" className="primary-button" onClick={submitTrace} disabled={!selectedFile || !selectedClass || !inspection?.sourceIdentity || !trustedCodeConfirmed || !constructorValidation.ok || !inputValidation.ok || isTraceActive}>Run Trace</button>
+          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSelectedFile || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || !constructorValidation.ok || !inputValidation.ok || isTraceActive}>Run Trace</button>
         </footer>
+          </>
+        )}
       </section>
     </div>
   )
