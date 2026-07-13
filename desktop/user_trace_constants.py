@@ -1,8 +1,10 @@
 """Tunable safety and lifecycle limits for local user-model tracing."""
 
 # Supported generated tensor configuration.
-SUPPORTED_TENSOR_DTYPES = frozenset({"float32"})
-SUPPORTED_TENSOR_GENERATORS = frozenset({"random_normal"})
+SUPPORTED_TENSOR_DTYPES = frozenset({"float32", "int64"})
+SUPPORTED_TENSOR_GENERATORS = frozenset({"random_normal", "random_integer"})
+TENSOR_DTYPE_BYTES = {"float32": 4, "int64": 8}
+DEFAULT_INTEGER_MAX_EXCLUSIVE = 10
 
 # Bounds representative tensor allocation before PyTorch is invoked.
 MAX_USER_INPUTS = 8
@@ -10,6 +12,7 @@ MAX_TENSOR_DIMENSIONS = 8
 MAX_TENSOR_ELEMENTS = 16_777_216
 MAX_TOTAL_INPUT_BYTES = 64 * 1024 * 1024
 FLOAT32_BYTES = 4
+INT64_BYTES = 8
 
 # Bounds JSON-safe values passed to a model constructor.
 MAX_CONSTRUCTOR_LITERAL_DEPTH = 8

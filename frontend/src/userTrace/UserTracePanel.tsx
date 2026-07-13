@@ -13,7 +13,7 @@ import type { TraceFailure } from './traceErrorDetails.ts'
 import { createInputDrafts, validateInputDrafts, type TensorInputDraft } from './inputDrafts.ts'
 import { TensorInputEditor } from './TensorInputEditor.tsx'
 import { MAX_TOTAL_INPUT_BYTES } from './constants.ts'
-import { suggestFromTraceError } from './errorInputSuggestions.ts'
+import { applyErrorInputSuggestion as applyInputSuggestion, suggestFromTraceError } from './errorInputSuggestions.ts'
 import { SourceInputStep, type SourceMode } from './SourceInputStep.tsx'
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
@@ -78,7 +78,7 @@ export function UserTracePanel({
   const selectedCandidate = activeInspection?.candidates.find((candidate) => candidate.className === selectedClass) ?? null
   const constructorValidation = buildConstructorConfig(selectedCandidate?.constructor.parameters ?? [], constructorFields)
   const inputValidation = validateInputDrafts(inputDrafts, MAX_TOTAL_INPUT_BYTES)
-  const errorInputSuggestion = traceFailure ? suggestFromTraceError(traceFailure.error.message, inputDrafts) : null
+  const errorInputSuggestion = traceFailure ? suggestFromTraceError(traceFailure, inputDrafts) : null
   const isTraceActive = traceState === 'starting' || traceState === 'running' || traceState === 'cancelling'
 
   useEffect(() => {
@@ -218,11 +218,8 @@ export function UserTracePanel({
   }
 
   function applyErrorInputSuggestion() {
-    if (!errorInputSuggestion?.draftId || errorInputSuggestion.dimensionIndex === undefined || errorInputSuggestion.value === undefined) return
-    setInputDrafts((current) => current.map((draft) => draft.id === errorInputSuggestion.draftId ? {
-      ...draft,
-      dimensions: draft.dimensions.map((dimension, index) => index === errorInputSuggestion.dimensionIndex ? errorInputSuggestion.value! : dimension),
-    } : draft))
+    if (!errorInputSuggestion) return
+    setInputDrafts((current) => applyInputSuggestion(current, errorInputSuggestion))
     onClearError()
   }
 
@@ -230,7 +227,12 @@ export function UserTracePanel({
     const sourceIdentity = activeInspection?.sourceIdentity
     if (!activeSource || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive) return
     const configuredInputs = inputValidation.ok ? inputValidation.inputs.map(({ draft, validation }) => ({
-      kind: 'tensor' as const, parameter_name: draft.parameterName, shape: validation.shape, dtype: draft.dtype, generator: draft.generator,
+      kind: 'tensor' as const,
+      parameter_name: draft.parameterName,
+      shape: validation.shape,
+      dtype: draft.dtype,
+      generator: draft.generator,
+      ...(draft.dtype === 'int64' ? { integer_max_exclusive: draft.integerMaxExclusive! } : {}),
     })) : []
     onClearError()
     rememberTrust(sourceIdentity.contentSha256)
@@ -370,7 +372,7 @@ export function UserTracePanel({
           {!useProviderInputs && !inputSignatureError && inputDrafts.length === 0 ? <p className="source-muted">This model has no required positional inputs.</p> : null}
           {!useProviderInputs ? inputDrafts.map((draft) => <TensorInputEditor key={draft.id} draft={draft} disabled={isTraceActive} onChange={updateInputDraft} />) : null}
           {!useProviderInputs && !inputSignatureError ? <div className="input-total"><span>Total input allocation</span><strong>{inputValidation.ok ? formatBytes(inputValidation.totalBytes) : inputValidation.message}</strong></div> : null}
-          {errorInputSuggestion ? <div className="input-recovery-suggestion"><span>{errorInputSuggestion.message}</span>{errorInputSuggestion.value ? <button type="button" onClick={applyErrorInputSuggestion}>Apply Suggestion</button> : null}</div> : null}
+          {errorInputSuggestion ? <div className="input-recovery-suggestion"><span>{errorInputSuggestion.message}</span><button type="button" onClick={applyErrorInputSuggestion}>Apply Suggestion</button></div> : null}
         </section>
 
         <section className="user-trace-section trusted-code-confirmation">

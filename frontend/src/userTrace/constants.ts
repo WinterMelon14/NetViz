@@ -3,6 +3,10 @@ export const MAX_TENSOR_DIMENSIONS = 8
 export const MAX_TENSOR_ELEMENTS = 16_777_216
 export const MAX_TOTAL_INPUT_BYTES = 64 * 1024 * 1024
 export const FLOAT32_BYTES = 4
+export const INT64_BYTES = 8
+export const DEFAULT_INTEGER_MAX_EXCLUSIVE = 10
+export const DEFAULT_IMAGE_SPATIAL_SIZE = 224
+export const DEFAULT_SEQUENCE_LENGTH = 128
 export const MAX_USER_INPUTS = 8
 
 // Bounds JSON-safe constructor values consistently with worker validation.

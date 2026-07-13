@@ -1,5 +1,6 @@
 import {
   FLOAT32_BYTES,
+  INT64_BYTES,
   MAX_TENSOR_DIMENSIONS,
   MAX_TENSOR_ELEMENTS,
   MAX_TOTAL_INPUT_BYTES,
@@ -9,7 +10,7 @@ export type TensorInputValidation =
   | { ok: true; shape: number[]; elementCount: number; sizeBytes: number }
   | { ok: false; message: string }
 
-export function validateTensorDimensions(dimensions: string[]): TensorInputValidation {
+export function validateTensorDimensions(dimensions: string[], dtype: 'float32' | 'int64' = 'float32'): TensorInputValidation {
   if (dimensions.length < 1 || dimensions.length > MAX_TENSOR_DIMENSIONS) {
     return { ok: false, message: `Shape must contain 1 to ${MAX_TENSOR_DIMENSIONS} dimensions.` }
   }
@@ -24,7 +25,7 @@ export function validateTensorDimensions(dimensions: string[]): TensorInputValid
     shape.push(value)
   }
   const elementCount = shape.reduce((total, dimension) => total * dimension, 1)
-  const sizeBytes = elementCount * FLOAT32_BYTES
+  const sizeBytes = elementCount * (dtype === 'int64' ? INT64_BYTES : FLOAT32_BYTES)
   if (!Number.isSafeInteger(elementCount) || elementCount > MAX_TENSOR_ELEMENTS) {
     return { ok: false, message: `Input exceeds the ${MAX_TENSOR_ELEMENTS.toLocaleString()} element limit.` }
   }

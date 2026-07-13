@@ -6,7 +6,7 @@ from typing import Any
 
 from desktop.trace_protocol import PROTOCOL_VERSION
 from desktop.user_trace_constants import (
-    FLOAT32_BYTES,
+    DEFAULT_INTEGER_MAX_EXCLUSIVE,
     MAX_CONSTRUCTOR_LITERAL_DEPTH,
     MAX_CONSTRUCTOR_LITERAL_VALUES,
     MAX_CONSTRUCTOR_SERIALIZED_BYTES,
@@ -17,6 +17,7 @@ from desktop.user_trace_constants import (
     MAX_USER_INPUTS,
     SUPPORTED_TENSOR_DTYPES,
     SUPPORTED_TENSOR_GENERATORS,
+    TENSOR_DTYPE_BYTES,
 )
 
 
@@ -162,7 +163,7 @@ def validate_user_trace_request(
     for index, raw_input in enumerate(inputs):
         path = f"inputs[{index}]"
         input_spec = _object(raw_input, path)
-        _exact_fields(input_spec, {"kind", "parameter_name", "shape", "dtype", "generator"}, path)
+        _exact_fields(input_spec, {"kind", "parameter_name", "shape", "dtype", "generator", "integer_max_exclusive"}, path)
         parameter_name = _non_empty_string(input_spec.get("parameter_name"), f"{path}.parameter_name")
         if not parameter_name.isidentifier():
             raise UserTraceRequestError(f"{path}.parameter_name", "must be a Python identifier")
@@ -190,17 +191,27 @@ def validate_user_trace_request(
             )
         dtype = input_spec.get("dtype")
         if dtype not in SUPPORTED_TENSOR_DTYPES:
-            raise UserTraceRequestError(f"{path}.dtype", "must equal 'float32'")
+            raise UserTraceRequestError(f"{path}.dtype", f"must be one of {sorted(SUPPORTED_TENSOR_DTYPES)}")
         generator = input_spec.get("generator")
         if generator not in SUPPORTED_TENSOR_GENERATORS:
-            raise UserTraceRequestError(f"{path}.generator", "must equal 'random_normal'")
-        total_bytes += element_count * FLOAT32_BYTES
+            raise UserTraceRequestError(f"{path}.generator", f"must be one of {sorted(SUPPORTED_TENSOR_GENERATORS)}")
+        if dtype == "float32" and generator != "random_normal":
+            raise UserTraceRequestError(f"{path}.generator", "must equal 'random_normal' for float32")
+        if dtype == "int64" and generator != "random_integer":
+            raise UserTraceRequestError(f"{path}.generator", "must equal 'random_integer' for int64")
+        integer_max = input_spec.get("integer_max_exclusive", DEFAULT_INTEGER_MAX_EXCLUSIVE)
+        if dtype == "int64" and (isinstance(integer_max, bool) or not isinstance(integer_max, int) or integer_max < 1):
+            raise UserTraceRequestError(f"{path}.integer_max_exclusive", "must be an integer of at least 1")
+        if dtype == "float32" and "integer_max_exclusive" in input_spec:
+            raise UserTraceRequestError(f"{path}.integer_max_exclusive", "is only supported for int64")
+        total_bytes += element_count * TENSOR_DTYPE_BYTES[dtype]
         normalized_inputs.append({
             "kind": "tensor",
             "parameter_name": parameter_name,
             "shape": list(shape),
             "dtype": dtype,
             "generator": generator,
+            **({"integer_max_exclusive": integer_max} if dtype == "int64" else {}),
         })
 
     if total_bytes > MAX_TOTAL_INPUT_BYTES:

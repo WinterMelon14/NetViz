@@ -19,7 +19,7 @@ from desktop.trace_protocol import (
     trace_file_success,
     trace_success,
 )
-from desktop.user_trace_constants import FLOAT32_BYTES, MAX_INLINE_TRACE_BYTES, MAX_TRACE_FILE_BYTES
+from desktop.user_trace_constants import MAX_INLINE_TRACE_BYTES, MAX_TRACE_FILE_BYTES, TENSOR_DTYPE_BYTES
 
 
 def trace_success_for_transport(run_id: str, payload: dict, output_path: str | None):
@@ -70,7 +70,7 @@ def input_error_details(input_specs: list[dict]) -> dict:
             "shape": spec["shape"],
             "dtype": spec["dtype"],
             "generator": spec["generator"],
-            "estimated_bytes": math.prod(spec["shape"]) * FLOAT32_BYTES,
+            "estimated_bytes": math.prod(spec["shape"]) * TENSOR_DTYPE_BYTES[spec["dtype"]],
         } for index, spec in enumerate(input_specs)]
     }
 

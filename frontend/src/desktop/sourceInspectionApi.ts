@@ -27,7 +27,17 @@ export type ForwardSignature = {
   inputSuggestions?: InputSuggestion[]
 }
 
-export type InputSuggestion = { parameterName: string; shapeTemplate: Array<number | null>; confidence: 'high' | 'medium' | 'low'; evidence: string }
+export type InputSuggestion = {
+  parameterName: string
+  shapeTemplate: Array<number | null>
+  dimensionSources: Array<'inferred' | 'default' | 'unknown'>
+  dtypeCategory?: 'floating' | 'integer' | 'boolean'
+  confidence: 'high' | 'medium' | 'low'
+  evidence: string[]
+  consumerPath?: string
+  presetKind?: 'image' | 'sequence'
+  integerRange?: { min: number; maxExclusive: number }
+}
 
 export type ModelCandidate = {
   className: string
@@ -123,9 +133,7 @@ function normalizeCandidate(value: ModelCandidate): ModelCandidate {
         varKwargName: typeof value.forward.varKwargName === 'string' || value.forward.varKwargName === null ? value.forward.varKwargName : undefined,
         lineNumber: typeof value.forward.lineNumber === 'number' ? value.forward.lineNumber : value.lineNumber,
         isAsync: value.forward.isAsync === true,
-        inputSuggestions: Array.isArray(value.forward.inputSuggestions)
-          ? value.forward.inputSuggestions.filter((item): item is InputSuggestion => isRecord(item) && typeof item.parameterName === 'string' && Array.isArray(item.shapeTemplate) && typeof item.evidence === 'string' && (item.confidence === 'high' || item.confidence === 'medium' || item.confidence === 'low'))
-          : [],
+        inputSuggestions: parseInputSuggestions(value.forward.inputSuggestions),
       }
     : null
 
@@ -144,6 +152,40 @@ function normalizeCandidate(value: ModelCandidate): ModelCandidate {
     },
     forward,
   }
+}
+
+function parseInputSuggestions(value: unknown): InputSuggestion[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item)
+      || typeof item.parameterName !== 'string'
+      || !Array.isArray(item.shapeTemplate)
+      || !item.shapeTemplate.every((dimension) => dimension === null || (typeof dimension === 'number' && Number.isInteger(dimension) && dimension > 0))
+      || !Array.isArray(item.evidence)
+      || !item.evidence.every((evidence) => typeof evidence === 'string')
+      || (item.confidence !== 'high' && item.confidence !== 'medium' && item.confidence !== 'low')) return []
+    const dimensionSources = Array.isArray(item.dimensionSources)
+      && item.dimensionSources.length === item.shapeTemplate.length
+      && item.dimensionSources.every((source) => source === 'inferred' || source === 'default' || source === 'unknown')
+      ? item.dimensionSources as InputSuggestion['dimensionSources']
+      : item.shapeTemplate.map((dimension) => dimension === null ? 'unknown' as const : 'inferred' as const)
+    const integerRange = isRecord(item.integerRange)
+      && typeof item.integerRange.min === 'number'
+      && typeof item.integerRange.maxExclusive === 'number'
+      ? { min: item.integerRange.min, maxExclusive: item.integerRange.maxExclusive }
+      : undefined
+    return [{
+      parameterName: item.parameterName,
+      shapeTemplate: item.shapeTemplate as Array<number | null>,
+      dimensionSources,
+      dtypeCategory: item.dtypeCategory === 'floating' || item.dtypeCategory === 'integer' || item.dtypeCategory === 'boolean' ? item.dtypeCategory : undefined,
+      confidence: item.confidence,
+      evidence: item.evidence,
+      consumerPath: typeof item.consumerPath === 'string' ? item.consumerPath : undefined,
+      presetKind: item.presetKind === 'image' || item.presetKind === 'sequence' ? item.presetKind : undefined,
+      integerRange,
+    }]
+  })
 }
 
 export function parseInspectModelSourceResult(value: unknown): InspectModelSourceResult {

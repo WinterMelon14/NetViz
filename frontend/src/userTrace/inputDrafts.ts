@@ -1,14 +1,20 @@
 import type { ForwardSignature } from '../desktop/sourceInspectionApi.ts'
-import { MAX_USER_INPUTS } from './constants.ts'
+import {
+  DEFAULT_IMAGE_SPATIAL_SIZE,
+  DEFAULT_INTEGER_MAX_EXCLUSIVE,
+  DEFAULT_SEQUENCE_LENGTH,
+  MAX_USER_INPUTS,
+} from './constants.ts'
 import { validateTensorDimensions, type TensorInputValidation } from './inputConfig.ts'
 
 export type TensorInputDraft = {
   id: string
   parameterName: string
   dimensions: string[]
-  dtype: 'float32'
-  generator: 'random_normal'
-  suggestionEvidence?: string
+  dimensionSources: Array<'inferred' | 'default' | 'chosen' | 'unknown'>
+  dtype: 'float32' | 'int64'
+  generator: 'random_normal' | 'random_integer'
+  integerMaxExclusive?: number
 }
 
 export type InputDraftResult =
@@ -27,13 +33,24 @@ export function createInputDrafts(forward: ForwardSignature | null): InputDraftR
     ok: true,
     drafts: parameters.map((parameter, index) => {
       const suggestion = forward.inputSuggestions?.find((item) => item.parameterName === parameter.name)
+      const suggestedDimensions = suggestion?.shapeTemplate.map((dimension, dimensionIndex) => {
+        if (dimension !== null) return String(dimension)
+        if (suggestion.presetKind === 'image' && dimensionIndex >= suggestion.shapeTemplate.length - 2) {
+          return String(DEFAULT_IMAGE_SPATIAL_SIZE)
+        }
+        if (suggestion.presetKind === 'sequence') return String(DEFAULT_SEQUENCE_LENGTH)
+        return ''
+      })
       return {
         id: `${parameter.name}-${index}`,
         parameterName: parameter.name,
-        dimensions: suggestion ? suggestion.shapeTemplate.map((dimension) => dimension === null ? '' : String(dimension)) : ['1', '1'],
-        dtype: 'float32',
-        generator: 'random_normal',
-        suggestionEvidence: suggestion?.evidence,
+        dimensions: suggestedDimensions ?? ['1', '1'],
+        dimensionSources: suggestion?.dimensionSources.map((source, dimensionIndex) => (
+          source === 'unknown' && suggestedDimensions?.[dimensionIndex] ? 'default' : source
+        )) ?? ['default', 'default'],
+        dtype: suggestion?.dtypeCategory === 'integer' ? 'int64' : 'float32',
+        generator: suggestion?.dtypeCategory === 'integer' ? 'random_integer' : 'random_normal',
+        integerMaxExclusive: suggestion?.dtypeCategory === 'integer' ? suggestion.integerRange?.maxExclusive ?? DEFAULT_INTEGER_MAX_EXCLUSIVE : undefined,
       }
     }),
   }
@@ -47,7 +64,10 @@ export function validateInputDrafts(drafts: TensorInputDraft[], maxTotalBytes: n
   const validations = new Map<string, TensorInputValidation>()
   let totalBytes = 0
   for (const draft of drafts) {
-    const validation = validateTensorDimensions(draft.dimensions)
+    if (draft.dtype === 'int64' && (!Number.isSafeInteger(draft.integerMaxExclusive) || (draft.integerMaxExclusive ?? 0) < 1)) {
+      return { ok: false, message: draft.parameterName + ': integer values need an upper bound of at least 1.', validations }
+    }
+    const validation = validateTensorDimensions(draft.dimensions, draft.dtype)
     validations.set(draft.id, validation)
     if (!validation.ok) return { ok: false, message: `${draft.parameterName}: ${validation.message}`, validations }
     if (totalBytes > maxTotalBytes - validation.sizeBytes) {

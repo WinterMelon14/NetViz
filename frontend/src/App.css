@@ -330,6 +330,7 @@ select:focus-visible {
 
 .graph-node:hover,
 .graph-node:focus-visible {
+  z-index: 100;
   border-color: var(--accent);
   outline: none;
 }
@@ -438,7 +439,7 @@ select:focus-visible {
   left: auto;
   right: 0;
   bottom: calc(100% + 8px);
-  z-index: 10;
+  z-index: 101;
   width: 220px;
   padding: 9px 10px;
   border: 1px solid var(--border);
@@ -1512,11 +1513,29 @@ select {
   gap: 10px;
 }
 
-.input-suggestion,
 .input-recovery-suggestion {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.4;
+}
+
+.input-spec-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.input-spec-controls label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.input-spec-controls input,
+.input-spec-controls select {
+  width: 130px;
 }
 
 .provider-input-toggle,

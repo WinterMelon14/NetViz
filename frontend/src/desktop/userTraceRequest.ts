@@ -2,11 +2,12 @@ export type UserTensorInputSpec = {
   kind: 'tensor'
   parameter_name: string
   shape: number[]
-  dtype: 'float32'
-  generator: 'random_normal'
+  dtype: 'float32' | 'int64'
+  generator: 'random_normal' | 'random_integer'
+  integer_max_exclusive?: number
 }
 
-export { FLOAT32_BYTES, MAX_TENSOR_DIMENSIONS, MAX_TENSOR_ELEMENTS, MAX_TOTAL_INPUT_BYTES }
+export { FLOAT32_BYTES, INT64_BYTES, MAX_TENSOR_DIMENSIONS, MAX_TENSOR_ELEMENTS, MAX_TOTAL_INPUT_BYTES }
 
 export type UserTraceBridgeRequest = {
   run_id: string
@@ -34,6 +35,7 @@ export type UserTraceWorkerRequest = Omit<UserTraceBridgeRequest, 'source'> & {
 }
 import {
   FLOAT32_BYTES,
+  INT64_BYTES,
   MAX_TENSOR_DIMENSIONS,
   MAX_TENSOR_ELEMENTS,
   MAX_TOTAL_INPUT_BYTES,

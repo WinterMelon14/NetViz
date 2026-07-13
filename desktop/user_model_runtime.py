@@ -201,7 +201,10 @@ def build_tensor_inputs(input_specs: list[dict[str, Any]]):
     tensors = []
     try:
         for input_spec in input_specs:
-            tensors.append(torch.randn(tuple(input_spec["shape"]), dtype=torch.float32, device="cpu"))
+            if input_spec["dtype"] == "int64":
+                tensors.append(torch.randint(0, input_spec["integer_max_exclusive"], tuple(input_spec["shape"]), dtype=torch.int64, device="cpu"))
+            else:
+                tensors.append(torch.randn(tuple(input_spec["shape"]), dtype=torch.float32, device="cpu"))
     except BaseException as exc:
         raise UserTraceRuntimeError(
             "input_construction_failed",
@@ -229,10 +232,10 @@ def build_provider_inputs(module: ModuleType, provider: dict[str, Any]):
     specs = []
     names = provider["parameter_names"]
     for index, tensor in enumerate(values):
-        if tensor.device.type != "cpu" or tensor.dtype != torch.float32 or tensor.numel() > MAX_TENSOR_ELEMENTS:
-            raise UserTraceRuntimeError("example_input_invalid", "Example tensor is not supported", "Example tensors must be bounded CPU float32 tensors.", "example_input_construction", {"index": index})
+        if tensor.device.type != "cpu" or tensor.dtype not in (torch.float32, torch.int64) or tensor.numel() > MAX_TENSOR_ELEMENTS:
+            raise UserTraceRuntimeError("example_input_invalid", "Example tensor is not supported", "Example tensors must be bounded CPU float32 or int64 tensors.", "example_input_construction", {"index": index})
         total_bytes += tensor.numel() * tensor.element_size()
         if total_bytes > MAX_TOTAL_INPUT_BYTES:
             raise UserTraceRuntimeError("example_input_invalid", "Example inputs are too large", "Example tensors exceed the combined input memory limit.", "example_input_construction")
-        specs.append({"kind": "tensor", "parameter_name": names[index] if index < len(names) else f"input_{index}", "shape": list(tensor.shape), "dtype": "float32", "generator": "provider"})
+        specs.append({"kind": "tensor", "parameter_name": names[index] if index < len(names) else f"input_{index}", "shape": list(tensor.shape), "dtype": "float32" if tensor.dtype == torch.float32 else "int64", "generator": "provider"})
     return list(values), specs

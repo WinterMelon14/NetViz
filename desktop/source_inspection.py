@@ -1,5 +1,6 @@
 import ast
 from typing import Any, Literal
+from desktop.input_suggestions import inspect_input_suggestions
 from desktop.user_trace_constants import MAX_SOURCE_CHARS
 
 InspectionErrorCode = Literal[
@@ -120,6 +121,7 @@ def inspect_import_aliases(module: ast.Module) -> dict[str, set[str]]:
         "torch": set[str](),
         "torch_nn": set[str](),
         "module": set[str](),
+        "torch_layers": {},
     }
 
     for node in module.body:
@@ -140,6 +142,8 @@ def inspect_import_aliases(module: ast.Module) -> dict[str, set[str]]:
                 for alias in node.names:
                     if alias.name == "Module":
                         aliases["module"].add(alias.asname or alias.name)
+                    else:
+                        aliases["torch_layers"][alias.asname or alias.name] = alias.name
 
     return aliases
 
@@ -173,7 +177,7 @@ def inspect_class(class_node: ast.ClassDef, aliases: dict[str, set[str]]) -> dic
         "bases": base_texts,
         "confidence": confidence,
         "constructor": inspect_constructor(class_node),
-        "forward": inspect_forward(class_node),
+        "forward": inspect_forward(class_node, aliases),
     }
 
 
@@ -218,7 +222,7 @@ def inspect_constructor(class_node: ast.ClassDef) -> dict[str, Any]:
     }
 
 
-def inspect_forward(class_node: ast.ClassDef) -> dict[str, Any] | None:
+def inspect_forward(class_node: ast.ClassDef, aliases: dict[str, Any]) -> dict[str, Any] | None:
     forward = find_method(class_node, "forward")
     if forward is None:
         return None
@@ -233,29 +237,9 @@ def inspect_forward(class_node: ast.ClassDef) -> dict[str, Any] | None:
         "lineNumber": forward.lineno,
         "isAsync": isinstance(forward, ast.AsyncFunctionDef),
     }
-    required = [parameter for parameter in parameters if parameter["required"] and parameter["position"] != "keyword_only"]
-    suggestion = inspect_first_input_suggestion(class_node, required[0]["name"] if required else None)
-    result["inputSuggestions"] = [suggestion] if suggestion else []
+    supported = [parameter["name"] for parameter in parameters if parameter["required"] and parameter["position"] != "keyword_only"]
+    result["inputSuggestions"] = inspect_input_suggestions(class_node, supported, aliases)
     return result
-
-
-def inspect_first_input_suggestion(class_node: ast.ClassDef, parameter_name: str | None) -> dict[str, Any] | None:
-    if not parameter_name:
-        return None
-    init_method = find_method(class_node, "__init__")
-    if init_method is None:
-        return None
-    for node in ast.walk(init_method):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or not node.args:
-            continue
-        literal = safe_literal(node.args[0])
-        if not literal["isLiteral"] or not isinstance(literal["value"], int):
-            continue
-        if node.func.attr == "Linear":
-            return {"parameterName": parameter_name, "shapeTemplate": [1, literal["value"]], "confidence": "high", "evidence": f"First Linear layer expects {literal['value']} features."}
-        if node.func.attr == "Conv2d":
-            return {"parameterName": parameter_name, "shapeTemplate": [1, literal["value"], None, None], "confidence": "high", "evidence": f"First Conv2d layer expects {literal['value']} channels; spatial dimensions are unknown."}
-    return None
 
 
 def find_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
