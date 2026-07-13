@@ -9,20 +9,22 @@ from pathlib import Path
 from typing import Any, Callable
 from desktop.selected_files import SelectedPythonFiles
 from desktop.trace_protocol import (
-    MAX_DIAGNOSTIC_BYTES,
-    MAX_PROTOCOL_OUTPUT_BYTES,
-    MAX_TRACE_FILE_BYTES,
     PROTOCOL_VERSION,
-    TRACE_FILE_TTL_SECONDS,
     trace_error,
     validate_worker_result,
 )
-from desktop.user_trace_constants import CANCEL_TERMINATION_TIMEOUT_SECONDS, MAX_REMEMBERED_CANCELLED_RUNS
+from desktop.user_trace_constants import (
+    CANCEL_TERMINATION_TIMEOUT_SECONDS,
+    DEFAULT_TRACE_TIMEOUT_SECONDS,
+    MAX_DIAGNOSTIC_BYTES,
+    MAX_PROTOCOL_OUTPUT_BYTES,
+    MAX_REMEMBERED_CANCELLED_RUNS,
+    MAX_TRACE_FILE_BYTES,
+    TRACE_FILE_TTL_SECONDS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEV_SERVER_URL = "http://localhost:5173/"
-DEFAULT_TRACE_TIMEOUT_SECONDS = 20
-
 WorkerCommandFactory = Callable[[Path], list[str]]
 
 

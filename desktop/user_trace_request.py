@@ -15,9 +15,9 @@ from desktop.user_trace_constants import (
     MAX_TENSOR_ELEMENTS,
     MAX_TOTAL_INPUT_BYTES,
     MAX_USER_INPUTS,
+    SUPPORTED_TENSOR_DTYPES,
+    SUPPORTED_TENSOR_GENERATORS,
 )
-SUPPORTED_TENSOR_DTYPES = frozenset({"float32"})
-SUPPORTED_TENSOR_GENERATORS = frozenset({"random_normal"})
 
 
 class UserTraceRequestError(ValueError):

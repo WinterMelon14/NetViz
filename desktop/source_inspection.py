@@ -1,7 +1,6 @@
 import ast
 from typing import Any, Literal
-
-MAX_SOURCE_CHARS = 200_000
+from desktop.user_trace_constants import MAX_SOURCE_CHARS
 
 InspectionErrorCode = Literal[
     "source_empty",

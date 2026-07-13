@@ -13,13 +13,12 @@ from desktop.user_model_runtime import (
 )
 from desktop.user_trace_request import UserTraceRequestError, validate_user_trace_request
 from desktop.trace_protocol import (
-    MAX_INLINE_TRACE_BYTES,
-    MAX_TRACE_FILE_BYTES,
     PROTOCOL_VERSION,
     trace_error,
     trace_file_success,
     trace_success,
 )
+from desktop.user_trace_constants import FLOAT32_BYTES, MAX_INLINE_TRACE_BYTES, MAX_TRACE_FILE_BYTES
 
 
 def trace_success_for_transport(run_id: str, payload: dict, output_path: str | None):
@@ -70,7 +69,7 @@ def input_error_details(input_specs: list[dict]) -> dict:
             "shape": spec["shape"],
             "dtype": spec["dtype"],
             "generator": spec["generator"],
-            "estimated_bytes": math.prod(spec["shape"]) * 4,
+            "estimated_bytes": math.prod(spec["shape"]) * FLOAT32_BYTES,
         } for index, spec in enumerate(input_specs)]
     }
 
