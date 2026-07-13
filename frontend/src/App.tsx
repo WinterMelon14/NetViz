@@ -4,7 +4,7 @@ import { Topbar } from './app/Topbar'
 import { EmptyTraceState } from './app/EmptyTraceState'
 import { TraceRecovery } from './app/TraceRecovery'
 import { getTraceViewState } from './app/traceViewState'
-import { cancelTrace, consumeTraceFile, createTraceRunId, runSelectedUserTrace, type RunTraceResponse, type TraceRunState, type TraceWorkerError } from './desktop/desktopTraceApi'
+import { cancelTrace, consumeTraceFile, createTraceRunId, runUserTrace, type RunTraceResponse, type TraceRunState, type TraceWorkerError } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
@@ -167,7 +167,7 @@ function App() {
 
   function runSelectedModelTrace(request: UserTraceDraft) {
     startDesktopTrace(
-      (runId) => runSelectedUserTrace({ ...request, run_id: runId }),
+      (runId) => runUserTrace({ ...request, run_id: runId }),
       () => setIsUserTraceOpen(false),
     )
   }

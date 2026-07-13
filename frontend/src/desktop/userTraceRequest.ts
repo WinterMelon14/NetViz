@@ -11,7 +11,7 @@ export { FLOAT32_BYTES, MAX_TENSOR_DIMENSIONS, MAX_TENSOR_ELEMENTS, MAX_TOTAL_IN
 export type UserTraceBridgeRequest = {
   run_id: string
   source: {
-    selection_id: string
+    source_id: string
     class_name: string
     content_sha256: string
   }

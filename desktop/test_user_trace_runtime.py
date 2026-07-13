@@ -236,11 +236,11 @@ class UserTraceRuntimeTests(unittest.TestCase):
     def test_selected_handle_bridge_runs_trace(self):
         selected_files = SelectedPythonFiles(picker=lambda: str(self.source_path))
         descriptor = selected_files.select()["selected"]
-        inspection = selected_files.inspect(descriptor["selectionId"])
+        inspection = selected_files.inspect(descriptor["sourceId"])
         api = DesktopTraceApi(manager=TraceRunManager(), selected_files=selected_files)
         request = self.bridge_request("selected-bridge")
         request["source"] = {
-            "selection_id": descriptor["selectionId"],
+            "source_id": descriptor["sourceId"],
             "class_name": "UserModel",
             "content_sha256": inspection["sourceIdentity"]["contentSha256"],
         }
@@ -249,6 +249,29 @@ class UserTraceRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["type"], "success")
         self.assertEqual(result["trace"]["payload"]["model_name"], "UserModel")
+
+    def test_inline_handle_bridge_runs_trace_and_remains_available_for_retry(self):
+        handles = SelectedPythonFiles(temp_root=self.root / "inline-handles")
+        sentinel = self.root / "inline-side-effect.txt"
+        source = f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('executed')\n" + VALID_MODEL_SOURCE
+        descriptor = handles.register_inline({"sourceText": source})["source"]
+        inspection = handles.inspect(descriptor["sourceId"])
+        api = DesktopTraceApi(manager=TraceRunManager(), selected_files=handles)
+        request = self.bridge_request("inline-bridge")
+        request["source"] = {
+            "source_id": descriptor["sourceId"],
+            "class_name": "UserModel",
+            "content_sha256": inspection["sourceIdentity"]["contentSha256"],
+        }
+
+        first = api.runUserTrace(request)
+        request["run_id"] = "inline-bridge-retry"
+        second = api.runUserTrace(request)
+
+        self.assertEqual(first["type"], "success")
+        self.assertEqual(second["type"], "success")
+        self.assertFalse(sentinel.exists())
+        self.assertTrue(list((self.root / "inline-handles").iterdir()))
 
     def test_literal_constructor_arguments_are_applied(self):
         self.source_path.write_text(

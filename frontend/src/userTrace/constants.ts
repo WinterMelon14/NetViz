@@ -11,5 +11,9 @@ export const MAX_CONSTRUCTOR_LITERAL_VALUES = 1_024
 export const MAX_CONSTRUCTOR_STRING_CHARS = 64 * 1024
 export const MAX_CONSTRUCTOR_SERIALIZED_BYTES = 256 * 1024
 
+// Mirrors host limits so paste controls can reject oversized source before bridge submission.
+export const MAX_SOURCE_CHARS = 200_000
+export const MAX_SOURCE_BYTES = 200_000
+
 // Namespaces remembered trust decisions by exact inspected source content.
 export const TRUSTED_SOURCE_STORAGE_PREFIX = 'tensor-trace:trusted-source:'

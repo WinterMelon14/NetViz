@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-from desktop.selected_files import SelectedPythonFiles
+from desktop.source_handles import SourceHandles
 from desktop.trace_protocol import (
     PROTOCOL_VERSION,
     trace_error,
@@ -398,27 +398,51 @@ class TraceRunManager:
 
 
 class DesktopTraceApi:
-    def __init__(self, manager: TraceRunManager | None = None, selected_files: SelectedPythonFiles | None = None):
+    def __init__(self, manager: TraceRunManager | None = None, selected_files: SourceHandles | None = None):
         self.manager = manager or TraceRunManager()
-        self.selected_files = selected_files or SelectedPythonFiles()
+        self.sources = selected_files or SourceHandles()
+        self.selected_files = self.sources
 
-    def runSelectedUserTrace(self, request: Any):
-        resolved = self.selected_files.trace_request(request)
+    def runUserTrace(self, request: Any):
+        resolved = self.sources.trace_request(request)
         if resolved.get("type") == "error":
             return resolved
-        return self.manager.run_user_trace(resolved)
+        source_path = resolved["source"]["file_path"]
+        source_id = request.get("source", {}).get("source_id") if isinstance(request, dict) else None
+        display_name = self.sources.display_name(source_id)
+        result = self.manager.run_user_trace(resolved)
+        if result.get("type") == "error" and display_name:
+            error = result.get("error")
+            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                error["message"] = error["message"].replace(source_path, display_name)
+        return result
+
+    def runSelectedUserTrace(self, request: Any):
+        return self.runUserTrace(request)
 
     def selectPythonFile(self):
-        return self.selected_files.select()
+        return self.sources.select()
+
+    def registerInlinePythonSource(self, request: Any):
+        return self.sources.register_inline(request)
+
+    def inspectPythonSource(self, sourceId: Any):
+        return self.sources.inspect(sourceId)
+
+    def releasePythonSource(self, sourceId: Any):
+        return self.sources.release(sourceId)
 
     def inspectSelectedPythonFile(self, selectionId: Any):
-        return self.selected_files.inspect(selectionId)
+        return self.sources.inspect(selectionId)
 
     def cancelTrace(self, runId: str):
         return self.manager.cancel_trace(runId)
 
     def consumeTraceFile(self, runId: str, path: str):
         return self.manager.consume_trace_file(runId, path)
+
+    def close(self):
+        self.sources.close()
 
 def main():
     try:
@@ -429,11 +453,13 @@ def main():
             "Install pywebview, start the Vite dev server, then run this module again."
         ) from exc
 
-    webview.create_window(
+    api = DesktopTraceApi()
+    window = webview.create_window(
         "PyTorch Trace Visualizer",
         DEV_SERVER_URL,
-        js_api=DesktopTraceApi(),
+        js_api=api,
     )
+    window.events.closed += lambda *args: api.close()
     webview.start(debug=True)
 
 

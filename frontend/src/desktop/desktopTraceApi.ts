@@ -38,9 +38,13 @@ declare global {
   interface Window {
     pywebview?: {
       api?: {
+        runUserTrace?: (request: UserTraceBridgeRequest) => Promise<unknown>
         runSelectedUserTrace?: (request: UserTraceBridgeRequest) => Promise<unknown>
         selectPythonFile?: () => Promise<unknown>
         inspectSelectedPythonFile?: (selectionId: string) => Promise<unknown>
+        registerInlinePythonSource?: (request: { sourceText: string; displayName?: string }) => Promise<unknown>
+        inspectPythonSource?: (sourceId: string) => Promise<unknown>
+        releasePythonSource?: (sourceId: string) => Promise<unknown>
         cancelTrace?: (runId: string) => Promise<unknown>
         consumeTraceFile?: (runId: string, path: string) => Promise<unknown>
       }
@@ -157,7 +161,7 @@ export function parseRunTraceResponse(value: unknown): RunTraceResponse {
 
 function hasTraceApi() {
   return Boolean(
-    window.pywebview?.api?.runSelectedUserTrace
+    window.pywebview?.api?.runUserTrace
     && window.pywebview.api.cancelTrace
     && window.pywebview.api.consumeTraceFile,
   )
@@ -193,10 +197,10 @@ export function createTraceRunId() {
   return `trace-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-export async function runSelectedUserTrace(request: UserTraceBridgeRequest) {
+export async function runUserTrace(request: UserTraceBridgeRequest) {
   try {
     await waitForPywebviewReady()
-    const result = await window.pywebview?.api?.runSelectedUserTrace?.(request)
+    const result = await window.pywebview?.api?.runUserTrace?.(request)
     return parseRunTraceResponse(result)
   } catch (error) {
     return {

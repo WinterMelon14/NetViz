@@ -17,6 +17,8 @@ const FRIENDLY_STAGES: Record<string, string> = {
   host_transport: 'Loading trace result',
   source_identity: 'Checking model source',
   host_selection: 'Checking selected file',
+  host_source: 'Checking model source',
+  source_registration: 'Preparing pasted source',
   worker_timeout: 'Executing and tracing model',
   worker_cancelled: 'Cancelling trace',
 }

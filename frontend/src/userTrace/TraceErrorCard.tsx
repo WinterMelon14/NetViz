@@ -19,7 +19,7 @@ export function TraceErrorCard({
 }) {
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
   const isSourceFailure = failure.error.code === 'source_changed' || failure.error.code === 'source_reinspection_required'
-  const isSelectionFailure = failure.error.code === 'selected_file_unavailable'
+  const isSelectionFailure = failure.error.code === 'source_unavailable' || failure.error.code === 'selected_file_unavailable'
   const details = technicalErrorDetails(failure, import.meta.env.DEV)
   const suppliedInputs = suppliedInputDetails(failure)
 
@@ -43,7 +43,7 @@ export function TraceErrorCard({
       </div>
       <div className="trace-error-actions">
         {isSourceFailure && canInspectAgain ? <button type="button" onClick={onInspectAgain}>Inspect Again</button> : null}
-        {isSelectionFailure ? <button type="button" onClick={onChooseFile}>Choose Different File</button> : null}
+        {isSelectionFailure ? <button type="button" onClick={onChooseFile}>Choose Source Again</button> : null}
         {!isSourceFailure && !isSelectionFailure ? <button type="button" onClick={onRetry}>Try Again</button> : null}
         <button type="button" onClick={onClose}>Close</button>
       </div>

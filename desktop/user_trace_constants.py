@@ -20,6 +20,7 @@ MAX_CONSTRUCTOR_SERIALIZED_BYTES = 256 * 1024
 # Bounds selected and pasted source inspection before parsing.
 MAX_SOURCE_FILE_BYTES = 200_000
 MAX_SOURCE_CHARS = 200_000
+MAX_SOURCE_DISPLAY_NAME_CHARS = 120
 
 # Bounds worker protocol, diagnostics, and trace-result transport.
 MAX_INLINE_TRACE_BYTES = 1 * 1024 * 1024

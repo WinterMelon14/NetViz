@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TraceRunState } from '../desktop/desktopTraceApi.ts'
-import { inspectSelectedPythonFile, selectPythonFile } from '../desktop/selectedFileApi.ts'
-import type { SelectedPythonFile } from '../desktop/selectedFileApi.ts'
+import { inspectPythonSource, registerInlinePythonSource, releasePythonSource, selectPythonFile } from '../desktop/sourceApi.ts'
+import type { PythonSource } from '../desktop/sourceApi.ts'
 import type { InspectModelSourceSuccess, ModelCandidate, SourceInspectionError } from '../desktop/sourceInspectionApi.ts'
 import type { UserTraceBridgeRequest } from '../desktop/userTraceRequest.ts'
 import { buildConstructorConfig, initialConstructorFields, type ConstructorFieldState } from './constructorConfig.ts'
@@ -14,6 +14,7 @@ import { createInputDrafts, validateInputDrafts, type TensorInputDraft } from '.
 import { TensorInputEditor } from './TensorInputEditor.tsx'
 import { MAX_TOTAL_INPUT_BYTES } from './constants.ts'
 import { suggestFromTraceError } from './errorInputSuggestions.ts'
+import { SourceInputStep, type SourceMode } from './SourceInputStep.tsx'
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
 
@@ -53,7 +54,9 @@ export function UserTracePanel({
   onClearError: () => void
   onClose: () => void
 }) {
-  const [selectedFile, setSelectedFile] = useState<SelectedPythonFile | null>(null)
+  const [sourceMode, setSourceMode] = useState<SourceMode>('file')
+  const [source, setSource] = useState<PythonSource | null>(null)
+  const [pastedText, setPastedText] = useState('')
   const [inspection, setInspection] = useState<InspectModelSourceSuccess | null>(null)
   const [inspectionError, setInspectionError] = useState<SourceInspectionError | null>(null)
   const [selectedClass, setSelectedClass] = useState<string | null>(null)
@@ -66,10 +69,11 @@ export function UserTracePanel({
   const [isInspecting, setIsInspecting] = useState(false)
   const requestIdRef = useRef(0)
   const mountedRef = useRef(true)
+  const sourceRef = useRef<PythonSource | null>(null)
   const failureCode = traceFailure?.error.code
   const isSourceInvalidated = failureCode === 'source_changed' || failureCode === 'source_reinspection_required'
-  const isSelectionInvalidated = failureCode === 'selected_file_unavailable'
-  const activeSelectedFile = isSelectionInvalidated ? null : selectedFile
+  const isSelectionInvalidated = failureCode === 'source_unavailable' || failureCode === 'selected_file_unavailable'
+  const activeSource = isSelectionInvalidated ? null : source
   const activeInspection = isSourceInvalidated || isSelectionInvalidated ? null : inspection
   const selectedCandidate = activeInspection?.candidates.find((candidate) => candidate.className === selectedClass) ?? null
   const constructorValidation = buildConstructorConfig(selectedCandidate?.constructor.parameters ?? [], constructorFields)
@@ -82,8 +86,38 @@ export function UserTracePanel({
     return () => {
       mountedRef.current = false
       requestIdRef.current += 1
+      const currentSource = sourceRef.current
+      if (currentSource) void releasePythonSource(currentSource.sourceId)
     }
   }, [])
+
+  useEffect(() => {
+    sourceRef.current = source
+  }, [source])
+
+  function resetSourceConfiguration() {
+    requestIdRef.current += 1
+    setSelectedClass(null)
+    setConstructorFields({})
+    setInputDrafts([])
+    setInputSignatureError(null)
+    setUseProviderInputs(false)
+    setTrustedCodeConfirmed(false)
+    setInspection(null)
+    setInspectionError(null)
+    setIsInspecting(false)
+    onClearError()
+  }
+
+  async function releaseSourceHandle(handle: PythonSource | null) {
+    if (!handle) return true
+    const result = await releasePythonSource(handle.sourceId)
+    if (!result.ok && mountedRef.current) {
+      setInspectionError(result.error)
+      return false
+    }
+    return true
+  }
 
   async function chooseFile() {
     if (isSelecting || isTraceActive) return
@@ -96,13 +130,20 @@ export function UserTracePanel({
       setInspectionError(result.error)
       return
     }
-    if (!result.selected) return
-
-    setSelectedFile(result.selected)
-    await inspectFile(result.selected)
+    if (!result.source) return
+    if (source && !window.confirm('Discard the current model source and configuration?')) {
+      await releaseSourceHandle(result.source)
+      return
+    }
+    if (!await releaseSourceHandle(source)) {
+      await releaseSourceHandle(result.source)
+      return
+    }
+    setSource(result.source)
+    await inspectSource(result.source)
   }
 
-  async function inspectFile(file: SelectedPythonFile) {
+  async function inspectSource(nextSource: PythonSource) {
     const requestId = ++requestIdRef.current
     onClearError()
     setSelectedClass(null)
@@ -114,7 +155,7 @@ export function UserTracePanel({
     setInspection(null)
     setInspectionError(null)
     setIsInspecting(true)
-    const inspectionResult = await inspectSelectedPythonFile(file.selectionId)
+    const inspectionResult = await inspectPythonSource(nextSource.sourceId)
     if (!mountedRef.current || requestIdRef.current !== requestId) return
     setIsInspecting(false)
     if (inspectionResult.ok) {
@@ -126,6 +167,49 @@ export function UserTracePanel({
       )
     }
     else setInspectionError(inspectionResult.error)
+  }
+
+  async function inspectPaste() {
+    if (isInspecting || isTraceActive) return
+    resetSourceConfiguration()
+    setIsInspecting(true)
+    const registered = await registerInlinePythonSource(pastedText)
+    if (!mountedRef.current) return
+    if (!registered.ok) {
+      setIsInspecting(false)
+      setInspectionError(registered.error)
+      return
+    }
+    setSource(registered.source)
+    await inspectSource(registered.source)
+  }
+
+  function changePastedText(value: string) {
+    setPastedText(value)
+    if (source || inspection) {
+      const previous = source
+      setSource(null)
+      resetSourceConfiguration()
+      void releaseSourceHandle(previous)
+    }
+  }
+
+  function clearPaste() {
+    const previous = source
+    setPastedText('')
+    setSource(null)
+    resetSourceConfiguration()
+    void releaseSourceHandle(previous)
+  }
+
+  async function changeSourceMode(nextMode: SourceMode) {
+    if (nextMode === sourceMode) return
+    if ((source || pastedText || inspection) && !window.confirm('Discard the current model source and configuration?')) return
+    if (!await releaseSourceHandle(source)) return
+    setSourceMode(nextMode)
+    setSource(null)
+    setPastedText('')
+    resetSourceConfiguration()
   }
 
   function updateInputDraft(nextDraft: TensorInputDraft) {
@@ -144,7 +228,7 @@ export function UserTracePanel({
 
   function submitTrace() {
     const sourceIdentity = activeInspection?.sourceIdentity
-    if (!activeSelectedFile || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive) return
+    if (!activeSource || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive) return
     const configuredInputs = inputValidation.ok ? inputValidation.inputs.map(({ draft, validation }) => ({
       kind: 'tensor' as const, parameter_name: draft.parameterName, shape: validation.shape, dtype: draft.dtype, generator: draft.generator,
     })) : []
@@ -152,7 +236,7 @@ export function UserTracePanel({
     rememberTrust(sourceIdentity.contentSha256)
     onRun({
       source: {
-        selection_id: activeSelectedFile.selectionId,
+        source_id: activeSource.sourceId,
         class_name: selectedClass,
         content_sha256: sourceIdentity.contentSha256,
       },
@@ -211,23 +295,21 @@ export function UserTracePanel({
           </section>
         ) : (
           <>
-        <section className="user-trace-section">
-          <div className="user-trace-section-heading">
-            <div><span>1</span><strong>Python file</strong></div>
-            <button type="button" onClick={chooseFile} disabled={isSelecting || isTraceActive}>
-              {isSelecting ? 'Opening...' : activeSelectedFile ? 'Choose Different File' : 'Choose Python File'}
-            </button>
-          </div>
-          {activeSelectedFile ? (
-            <div className="selected-file-row">
-              <strong>{activeSelectedFile.fileName}</strong>
-              <span>{formatBytes(activeSelectedFile.sizeBytes)}</span>
-              <button type="button" disabled={isInspecting || isTraceActive} onClick={() => inspectFile(activeSelectedFile)}>Inspect Again</button>
-            </div>
-          ) : <p className="source-muted">Select one local .py file. Selection does not import or execute it.</p>}
-          {isInspecting ? <p className="source-muted">Inspecting source...</p> : null}
-          {inspectionError ? <div className="source-error"><strong>{inspectionError.title}</strong><p>{inspectionError.message}</p></div> : null}
-        </section>
+        <SourceInputStep
+          mode={sourceMode}
+          source={activeSource}
+          pastedText={pastedText}
+          inspectionError={inspectionError}
+          isSelecting={isSelecting}
+          isInspecting={isInspecting}
+          disabled={isTraceActive}
+          onModeChange={(mode) => void changeSourceMode(mode)}
+          onChooseFile={() => void chooseFile()}
+          onInspectSource={() => { if (activeSource) void inspectSource(activeSource) }}
+          onPastedTextChange={changePastedText}
+          onInspectPaste={() => void inspectPaste()}
+          onClearPaste={clearPaste}
+        />
 
         <section className="user-trace-section">
           <div className="user-trace-section-heading"><div><span>2</span><strong>Model class</strong></div></div>
@@ -250,7 +332,7 @@ export function UserTracePanel({
                 )
               })}
             </div>
-          ) : <p className="source-muted">{activeInspection ? 'No candidate model classes found.' : 'Choose a file to inspect model classes.'}</p>}
+          ) : <p className="source-muted">{activeInspection ? 'No candidate model classes found.' : 'Choose or paste source to inspect model classes.'}</p>}
         </section>
 
         <section className="user-trace-section">
@@ -293,7 +375,7 @@ export function UserTracePanel({
 
         <section className="user-trace-section trusted-code-confirmation">
           <div className="user-trace-section-heading"><div><span>5</span><strong>Execute trusted code</strong></div></div>
-          <p>Tracing imports and executes this local Python file with your user permissions. The worker isolates crashes and state, but it is not a security sandbox. Static inspection does not verify that code is safe.</p>
+          <p>Tracing imports and executes this local Python source with your user permissions. The worker isolates crashes and state, but it is not a security sandbox. Static inspection does not verify that code is safe.</p>
           <label>
             <input
               type="checkbox"
@@ -311,19 +393,20 @@ export function UserTracePanel({
         {traceFailure ? (
           <TraceErrorCard
             failure={traceFailure}
-            canInspectAgain={Boolean(selectedFile)}
+            canInspectAgain={Boolean(source || (sourceMode === 'paste' && pastedText))}
             onRetry={submitTrace}
             onInspectAgain={() => {
-              if (selectedFile) void inspectFile(selectedFile)
+              if (source) void inspectSource(source)
+              else if (sourceMode === 'paste') void inspectPaste()
             }}
-            onChooseFile={() => void chooseFile()}
+            onChooseFile={() => sourceMode === 'file' ? void chooseFile() : void inspectPaste()}
             onClose={onClose}
           />
         ) : null}
 
         <footer>
           <span className="toolbar-status">{traceState !== 'idle' ? traceState : 'ready'}</span>
-          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSelectedFile || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive}>Run Trace</button>
+          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSource || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive}>Run Trace</button>
         </footer>
           </>
         )}
