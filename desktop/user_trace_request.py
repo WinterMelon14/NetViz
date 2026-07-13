@@ -108,7 +108,7 @@ def validate_user_trace_request(
     request = _object(value, "request")
     _exact_fields(
         request,
-        {"protocol_version", "run_id", "source", "constructor", "inputs", "output_path"},
+        {"protocol_version", "run_id", "source", "constructor", "inputs", "input_provider", "output_path"},
         "request",
     )
 
@@ -137,11 +137,25 @@ def validate_user_trace_request(
 
     constructor = _validate_constructor(request.get("constructor"))
 
+    provider = request.get("input_provider")
+    normalized_provider = None
+    if provider is not None:
+        provider = _object(provider, "input_provider")
+        _exact_fields(provider, {"function_name", "parameter_names"}, "input_provider")
+        if provider.get("function_name") != "netviz_example_inputs":
+            raise UserTraceRequestError("input_provider.function_name", "must equal 'netviz_example_inputs'")
+        parameter_names = provider.get("parameter_names")
+        if not isinstance(parameter_names, list) or len(parameter_names) > MAX_USER_INPUTS or any(not isinstance(name, str) or not name.isidentifier() for name in parameter_names):
+            raise UserTraceRequestError("input_provider.parameter_names", f"must contain at most {MAX_USER_INPUTS} Python identifiers")
+        normalized_provider = {"function_name": "netviz_example_inputs", "parameter_names": list(parameter_names)}
+
     inputs = request.get("inputs")
     if not isinstance(inputs, list):
         raise UserTraceRequestError("inputs", "must be an array")
     if len(inputs) > MAX_USER_INPUTS:
         raise UserTraceRequestError("inputs", f"must contain at most {MAX_USER_INPUTS} tensor inputs")
+    if normalized_provider is not None and inputs:
+        raise UserTraceRequestError("inputs", "must be empty when input_provider is configured")
 
     total_bytes = 0
     normalized_inputs: list[dict[str, Any]] = []
@@ -206,5 +220,6 @@ def validate_user_trace_request(
         "source": {"file_path": str(file_path), "class_name": class_name, "content_sha256": content_sha256},
         "constructor": constructor,
         "inputs": normalized_inputs,
+        "input_provider": normalized_provider,
         "output_path": str(output_path),
     }

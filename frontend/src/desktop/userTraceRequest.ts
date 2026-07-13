@@ -20,6 +20,7 @@ export type UserTraceBridgeRequest = {
     kwargs: Record<string, SerializableLiteral>
   }
   inputs: UserTensorInputSpec[]
+  input_provider: { function_name: 'netviz_example_inputs'; parameter_names: string[] } | null
 }
 
 export type UserTraceWorkerRequest = Omit<UserTraceBridgeRequest, 'source'> & {

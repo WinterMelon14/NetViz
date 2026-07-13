@@ -405,6 +405,29 @@ class UserTraceRuntimeTests(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "cancelled")
         self.assertEqual(manager.run_user_trace(self.fixture_bridge_request("valid_model.py", "after-cancel-multi"))["type"], "success")
 
+    def test_model_provided_example_tensors_are_validated_and_traced(self):
+        self.source_path.write_text(
+            "import torch\ndef netviz_example_inputs(): return (torch.randn(1, 4),)\n"
+            "class UserModel(torch.nn.Module):\n    def forward(self, x): return x.relu()\n",
+            encoding="utf-8",
+        )
+        request = self.worker_request("provider-input")
+        request["inputs"] = []
+        request["input_provider"] = {"function_name": "netviz_example_inputs", "parameter_names": ["x"]}
+        self.assertEqual(run_trace(str(self.write_request(request)))["type"], "success")
+
+        self.source_path.write_text(
+            "import torch\ndef netviz_example_inputs(): return (torch.ones(1, dtype=torch.int64),)\n"
+            "class UserModel(torch.nn.Module):\n    def forward(self, x): return x\n",
+            encoding="utf-8",
+        )
+        request = self.worker_request("provider-invalid")
+        request["inputs"] = []
+        request["input_provider"] = {"function_name": "netviz_example_inputs", "parameter_names": ["x"]}
+        result = run_trace(str(self.write_request(request)))
+        self.assertEqual(result["error"]["code"], "example_input_invalid")
+        self.assertEqual(result["error"]["stage"], "example_input_construction")
+
 
 if __name__ == "__main__":
     unittest.main()

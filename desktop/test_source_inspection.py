@@ -11,6 +11,21 @@ def candidates(source: str):
 
 
 class SourceInspectionTests(unittest.TestCase):
+    def test_detects_example_provider_and_linear_input_suggestion(self):
+        result = inspect_model_source("""
+import torch
+def netviz_example_inputs(): return (torch.randn(1, 12),)
+class Demo(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(12, 4)
+    def forward(self, x): return self.linear(x)
+""")
+        self.assertEqual(result["exampleInputProvider"], "netviz_example_inputs")
+        suggestion = result["candidates"][0]["forward"]["inputSuggestions"][0]
+        self.assertEqual(suggestion["shapeTemplate"], [1, 12])
+        self.assertIn("12 features", suggestion["evidence"])
+
     def test_empty_source(self):
         result = inspect_model_source("   ")
 
@@ -106,6 +121,7 @@ class OptionalWidth(torch.nn.Module):
 
         self.assertTrue(found[0]["constructor"]["supportsNoArgumentConstruction"])
         self.assertEqual(found[0]["constructor"]["parameters"][0]["defaultValue"], 4)
+        self.assertEqual(found[0]["constructor"]["parameters"][0]["typeText"], "int")
 
     def test_required_forward_parameter(self):
         found = candidates("""

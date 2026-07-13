@@ -210,3 +210,29 @@ def build_tensor_inputs(input_specs: list[dict[str, Any]]):
             "input_construction",
         ) from exc
     return tensors
+
+
+def build_provider_inputs(module: ModuleType, provider: dict[str, Any]):
+    import torch
+    from desktop.user_trace_constants import MAX_TENSOR_ELEMENTS, MAX_TOTAL_INPUT_BYTES, MAX_USER_INPUTS
+
+    function = getattr(module, provider["function_name"], None)
+    if not callable(function):
+        raise UserTraceRuntimeError("example_input_provider_not_found", "Example input provider was not found", "The inspected netviz_example_inputs function is unavailable.", "example_input_construction")
+    try:
+        values = function()
+    except BaseException as exc:
+        raise UserTraceRuntimeError("example_input_construction_failed", "Example inputs could not be created", str(exc) or type(exc).__name__, "example_input_construction") from exc
+    if not isinstance(values, (tuple, list)) or len(values) > MAX_USER_INPUTS or not all(isinstance(value, torch.Tensor) for value in values):
+        raise UserTraceRuntimeError("example_input_invalid", "Example inputs are not supported", f"netviz_example_inputs must return a tuple or list of at most {MAX_USER_INPUTS} tensors.", "example_input_construction")
+    total_bytes = 0
+    specs = []
+    names = provider["parameter_names"]
+    for index, tensor in enumerate(values):
+        if tensor.device.type != "cpu" or tensor.dtype != torch.float32 or tensor.numel() > MAX_TENSOR_ELEMENTS:
+            raise UserTraceRuntimeError("example_input_invalid", "Example tensor is not supported", "Example tensors must be bounded CPU float32 tensors.", "example_input_construction", {"index": index})
+        total_bytes += tensor.numel() * tensor.element_size()
+        if total_bytes > MAX_TOTAL_INPUT_BYTES:
+            raise UserTraceRuntimeError("example_input_invalid", "Example inputs are too large", "Example tensors exceed the combined input memory limit.", "example_input_construction")
+        specs.append({"kind": "tensor", "parameter_name": names[index] if index < len(names) else f"input_{index}", "shape": list(tensor.shape), "dtype": "float32", "generator": "provider"})
+    return list(values), specs

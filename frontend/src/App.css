@@ -1187,13 +1187,11 @@ code {
 
 .constructor-field > label {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 8px;
-  align-items: center;
+  gap: 2px;
+  align-items: start;
 }
 
 .constructor-field > label small {
-  grid-column: 2;
   color: var(--text-muted);
 }
 
@@ -1431,6 +1429,27 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.input-suggestion,
+.input-recovery-suggestion {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.provider-input-toggle,
+.input-recovery-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-recovery-suggestion {
+  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
 }
 
 .tensor-input-editor > header span,

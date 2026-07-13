@@ -8,6 +8,7 @@ from pathlib import Path
 from desktop.user_model_runtime import (
     UserTraceRuntimeError,
     build_tensor_inputs,
+    build_provider_inputs,
     instantiate_model,
     load_sanitized_user_module,
 )
@@ -114,7 +115,11 @@ def run_trace(request_path: str | None = None):
                 request["constructor"]["args"],
                 request["constructor"]["kwargs"],
             )
-            example_inputs = build_tensor_inputs(request["inputs"])
+            if request["input_provider"]:
+                example_inputs, diagnostic_specs = build_provider_inputs(module, request["input_provider"])
+            else:
+                example_inputs = build_tensor_inputs(request["inputs"])
+                diagnostic_specs = request["inputs"]
             from util.summary import model_summary
 
             payload = model_summary(model, *example_inputs, run_shape_prop=False)
@@ -137,7 +142,7 @@ def run_trace(request_path: str | None = None):
             "Model trace failed",
             str(exc),
             "forward_trace",
-            input_error_details(request["inputs"]),
+            input_error_details(locals().get("diagnostic_specs", request["inputs"])),
             exc=exc,
         )
 

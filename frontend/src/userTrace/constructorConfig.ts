@@ -40,10 +40,11 @@ function validateLiteral(value: unknown, path: string, depth: number, count: { v
 export function initialConstructorFields(parameters: FunctionParameter[]): Record<string, ConstructorFieldState> {
   return Object.fromEntries(parameters.map((parameter) => [
     parameter.name,
-    {
-      enabled: parameter.required,
-      text: parameter.defaultValue === undefined ? '' : JSON.stringify(parameter.defaultValue),
-    },
+    Object.prototype.hasOwnProperty.call(parameter, 'defaultValue')
+      ? { enabled: true, text: JSON.stringify(parameter.defaultValue) ?? 'null' }
+      : parameter.defaultDisplay
+        ? { enabled: false, text: parameter.defaultDisplay }
+        : { enabled: true, text: '' },
   ]))
 }
 

@@ -5,6 +5,7 @@ export type FunctionParameter = {
   position: 'positional_only' | 'positional_or_keyword' | 'keyword_only'
   required: boolean
   annotationText?: string
+  typeText?: string
   defaultValue?: SerializableLiteral
   defaultDisplay?: string
 }
@@ -23,7 +24,10 @@ export type ForwardSignature = {
   varKwargName?: string | null
   lineNumber: number
   isAsync?: boolean
+  inputSuggestions?: InputSuggestion[]
 }
+
+export type InputSuggestion = { parameterName: string; shapeTemplate: Array<number | null>; confidence: 'high' | 'medium' | 'low'; evidence: string }
 
 export type ModelCandidate = {
   className: string
@@ -54,6 +58,7 @@ export type InspectModelSourceSuccess = {
   candidates: ModelCandidate[]
   warnings: SourceInspectionWarning[]
   sourceIdentity?: { contentSha256: string; sizeBytes: number }
+  exampleInputProvider?: 'netviz_example_inputs' | null
 }
 
 export type InspectModelSourceFailure = {
@@ -118,6 +123,9 @@ function normalizeCandidate(value: ModelCandidate): ModelCandidate {
         varKwargName: typeof value.forward.varKwargName === 'string' || value.forward.varKwargName === null ? value.forward.varKwargName : undefined,
         lineNumber: typeof value.forward.lineNumber === 'number' ? value.forward.lineNumber : value.lineNumber,
         isAsync: value.forward.isAsync === true,
+        inputSuggestions: Array.isArray(value.forward.inputSuggestions)
+          ? value.forward.inputSuggestions.filter((item): item is InputSuggestion => isRecord(item) && typeof item.parameterName === 'string' && Array.isArray(item.shapeTemplate) && typeof item.evidence === 'string' && (item.confidence === 'high' || item.confidence === 'medium' || item.confidence === 'low'))
+          : [],
       }
     : null
 
@@ -165,6 +173,7 @@ export function parseInspectModelSourceResult(value: unknown): InspectModelSourc
         && typeof value.sourceIdentity.sizeBytes === 'number'
         ? { contentSha256: value.sourceIdentity.contentSha256, sizeBytes: value.sourceIdentity.sizeBytes }
         : undefined,
+      exampleInputProvider: value.exampleInputProvider === 'netviz_example_inputs' ? value.exampleInputProvider : null,
     }
   }
 

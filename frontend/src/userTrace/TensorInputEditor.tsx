@@ -8,6 +8,7 @@ export function TensorInputEditor({ draft, disabled, onChange }: { draft: Tensor
   return (
     <section className="tensor-input-editor">
       <header><strong>{draft.parameterName}</strong><span>positional tensor</span></header>
+      {draft.suggestionEvidence ? <p className="input-suggestion">Suggested from static inspection: {draft.suggestionEvidence}</p> : null}
       <div className="dimension-editor">
         {draft.dimensions.map((dimension, index) => (
           <label key={index}>Dim {index + 1}<input type="number" min="1" step="1" value={dimension} disabled={disabled} onChange={(event) => dimensions(draft.dimensions.map((item, current) => current === index ? event.target.value : item))} /></label>

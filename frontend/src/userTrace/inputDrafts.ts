@@ -8,6 +8,7 @@ export type TensorInputDraft = {
   dimensions: string[]
   dtype: 'float32'
   generator: 'random_normal'
+  suggestionEvidence?: string
 }
 
 export type InputDraftResult =
@@ -24,13 +25,17 @@ export function createInputDrafts(forward: ForwardSignature | null): InputDraftR
   if (parameters.length > MAX_USER_INPUTS) return { ok: false, message: `Models may have at most ${MAX_USER_INPUTS} required tensor inputs.` }
   return {
     ok: true,
-    drafts: parameters.map((parameter, index) => ({
-      id: `${parameter.name}-${index}`,
-      parameterName: parameter.name,
-      dimensions: ['1', '1'],
-      dtype: 'float32',
-      generator: 'random_normal',
-    })),
+    drafts: parameters.map((parameter, index) => {
+      const suggestion = forward.inputSuggestions?.find((item) => item.parameterName === parameter.name)
+      return {
+        id: `${parameter.name}-${index}`,
+        parameterName: parameter.name,
+        dimensions: suggestion ? suggestion.shapeTemplate.map((dimension) => dimension === null ? '' : String(dimension)) : ['1', '1'],
+        dtype: 'float32',
+        generator: 'random_normal',
+        suggestionEvidence: suggestion?.evidence,
+      }
+    }),
   }
 }
 
@@ -52,4 +57,3 @@ export function validateInputDrafts(drafts: TensorInputDraft[], maxTotalBytes: n
   }
   return { ok: true, inputs: drafts.map((draft) => ({ draft, validation: validations.get(draft.id) as Extract<TensorInputValidation, { ok: true }> })), totalBytes }
 }
-
