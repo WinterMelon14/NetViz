@@ -36,6 +36,7 @@ class UserTraceRequestTests(unittest.TestCase):
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [{
                 "kind": "tensor",
+                "parameter_name": "x",
                 "shape": [1, 3, 16, 16],
                 "dtype": "float32",
                 "generator": "random_normal",
@@ -94,10 +95,19 @@ class UserTraceRequestTests(unittest.TestCase):
         request["constructor"]["args"] = [nested]
         self.assert_invalid(request, "constructor.args[0][0][0][0][0][0][0][0][0]")
 
-    def test_rejects_input_count_dimensions_dtype_and_generator(self):
+    def test_accepts_zero_and_multiple_inputs_and_rejects_excessive_count(self):
         request = self.request()
         request["inputs"] = []
+        self.assertEqual(validate_user_trace_request(request, expected_output_path=self.output_path)["inputs"], [])
+        request = self.request()
+        request["inputs"] = request["inputs"] * 2
+        request["inputs"][1] = {**request["inputs"][1], "parameter_name": "y"}
+        self.assertEqual(len(validate_user_trace_request(request, expected_output_path=self.output_path)["inputs"]), 2)
+        request["inputs"] = request["inputs"] * 5
         self.assert_invalid(request, "inputs")
+
+    def test_rejects_dimensions_dtype_and_generator(self):
+        request = self.request()
         request = self.request()
         request["inputs"][0]["shape"] = [1] * 9
         self.assert_invalid(request, "inputs[0].shape")
@@ -107,6 +117,14 @@ class UserTraceRequestTests(unittest.TestCase):
         request = self.request()
         request["inputs"][0]["generator"] = "zeros"
         self.assert_invalid(request, "inputs[0].generator")
+
+    def test_rejects_combined_input_allocation(self):
+        request = self.request()
+        request["inputs"] = [
+            {**request["inputs"][0], "parameter_name": "left", "shape": [10_000_000]},
+            {**request["inputs"][0], "parameter_name": "right", "shape": [10_000_000]},
+        ]
+        self.assert_invalid(request, "inputs")
 
     def test_rejects_negative_non_integer_and_oversized_dimensions(self):
         for dimension in (-1, 0, 1.5, True):

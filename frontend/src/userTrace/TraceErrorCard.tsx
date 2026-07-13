@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { friendlyTraceStage, technicalErrorDetails, type TraceFailure } from './traceErrorDetails.ts'
+import { friendlyTraceStage, suppliedInputDetails, technicalErrorDetails, type TraceFailure } from './traceErrorDetails.ts'
+import { formatBytes } from './inputConfig.ts'
 
 export function TraceErrorCard({
   failure,
@@ -20,6 +21,7 @@ export function TraceErrorCard({
   const isSourceFailure = failure.error.code === 'source_changed' || failure.error.code === 'source_reinspection_required'
   const isSelectionFailure = failure.error.code === 'selected_file_unavailable'
   const details = technicalErrorDetails(failure, import.meta.env.DEV)
+  const suppliedInputs = suppliedInputDetails(failure)
 
   async function copyDetails() {
     try {
@@ -45,6 +47,14 @@ export function TraceErrorCard({
         {!isSourceFailure && !isSelectionFailure ? <button type="button" onClick={onRetry}>Try Again</button> : null}
         <button type="button" onClick={onClose}>Close</button>
       </div>
+      {suppliedInputs.length ? (
+        <div className="trace-error-inputs">
+          <strong>Inputs supplied to the model</strong>
+          {suppliedInputs.map((input) => (
+            <span key={`${input.index}-${input.parameterName}`}><b>{input.parameterName}</b> [{input.shape.join(', ')}] · {input.dtype} · {formatBytes(input.estimatedBytes)}</span>
+          ))}
+        </div>
+      ) : null}
       <details className="trace-error-details">
         <summary>Technical details</summary>
         <pre>{JSON.stringify(details, null, 2)}</pre>

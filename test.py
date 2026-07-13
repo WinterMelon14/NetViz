@@ -510,9 +510,8 @@ class ComplicatedTrackModel(nn.Module):
 
         return self.final_merge(final_input)
 from transcriber import PianoTranscriber, ModelWithHStackOnly, SDPASelfAttention
-model = SDPASelfAttention(d_model=128, n_heads=4, dropout=0.1)
-
+model = MultiInputModel(torch.randn(2, 3, 64, 64), torch.randn(2, 10))
 summary = model_summary(model, torch.randn(2, 50, 128))
 # Save output to frontend/public/branchy.json
-with open("frontend/public/branchy10.json", "w") as f:
+with open("frontend/public/branchy11.json", "w") as f:
     json.dump(summary, f)

@@ -1,5 +1,6 @@
 export type UserTensorInputSpec = {
   kind: 'tensor'
+  parameter_name: string
   shape: number[]
   dtype: 'float32'
   generator: 'random_normal'
@@ -18,7 +19,7 @@ export type UserTraceBridgeRequest = {
     args: SerializableLiteral[]
     kwargs: Record<string, SerializableLiteral>
   }
-  inputs: [UserTensorInputSpec]
+  inputs: UserTensorInputSpec[]
 }
 
 export type UserTraceWorkerRequest = Omit<UserTraceBridgeRequest, 'source'> & {

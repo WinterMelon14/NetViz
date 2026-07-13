@@ -29,6 +29,7 @@ class TraceRunManager(HostTraceRunManager):
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [{
                 "kind": "tensor",
+                "parameter_name": "x",
                 "shape": [1, 4],
                 "dtype": "float32",
                 "generator": "random_normal",

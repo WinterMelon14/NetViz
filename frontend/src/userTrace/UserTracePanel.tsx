@@ -4,13 +4,15 @@ import { inspectSelectedPythonFile, selectPythonFile } from '../desktop/selected
 import type { SelectedPythonFile } from '../desktop/selectedFileApi.ts'
 import type { InspectModelSourceSuccess, ModelCandidate, SourceInspectionError } from '../desktop/sourceInspectionApi.ts'
 import type { UserTraceBridgeRequest } from '../desktop/userTraceRequest.ts'
-import { MAX_TENSOR_DIMENSIONS } from '../desktop/userTraceRequest.ts'
 import { buildConstructorConfig, initialConstructorFields, type ConstructorFieldState } from './constructorConfig.ts'
 import { TRUSTED_SOURCE_STORAGE_PREFIX } from './constants.ts'
-import { formatBytes, validateTensorDimensions } from './inputConfig.ts'
+import { formatBytes } from './inputConfig.ts'
 import { LoadingIndicator } from '../components/LoadingIndicator.tsx'
 import { TraceErrorCard } from './TraceErrorCard.tsx'
 import type { TraceFailure } from './traceErrorDetails.ts'
+import { createInputDrafts, validateInputDrafts, type TensorInputDraft } from './inputDrafts.ts'
+import { TensorInputEditor } from './TensorInputEditor.tsx'
+import { MAX_TOTAL_INPUT_BYTES } from './constants.ts'
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
 
@@ -56,12 +58,12 @@ export function UserTracePanel({
   const [selectedClass, setSelectedClass] = useState<string | null>(null)
   const [constructorFields, setConstructorFields] = useState<Record<string, ConstructorFieldState>>({})
   const [trustedCodeConfirmed, setTrustedCodeConfirmed] = useState(false)
-  const [dimensions, setDimensions] = useState(['1', '1'])
+  const [inputDrafts, setInputDrafts] = useState<TensorInputDraft[]>([])
+  const [inputSignatureError, setInputSignatureError] = useState<string | null>(null)
   const [isSelecting, setIsSelecting] = useState(false)
   const [isInspecting, setIsInspecting] = useState(false)
   const requestIdRef = useRef(0)
   const mountedRef = useRef(true)
-  const inputValidation = validateTensorDimensions(dimensions)
   const failureCode = traceFailure?.error.code
   const isSourceInvalidated = failureCode === 'source_changed' || failureCode === 'source_reinspection_required'
   const isSelectionInvalidated = failureCode === 'selected_file_unavailable'
@@ -69,6 +71,7 @@ export function UserTracePanel({
   const activeInspection = isSourceInvalidated || isSelectionInvalidated ? null : inspection
   const selectedCandidate = activeInspection?.candidates.find((candidate) => candidate.className === selectedClass) ?? null
   const constructorValidation = buildConstructorConfig(selectedCandidate?.constructor.parameters ?? [], constructorFields)
+  const inputValidation = validateInputDrafts(inputDrafts, MAX_TOTAL_INPUT_BYTES)
   const isTraceActive = traceState === 'starting' || traceState === 'running' || traceState === 'cancelling'
 
   useEffect(() => {
@@ -101,6 +104,8 @@ export function UserTracePanel({
     onClearError()
     setSelectedClass(null)
     setConstructorFields({})
+    setInputDrafts([])
+    setInputSignatureError(null)
     setTrustedCodeConfirmed(false)
     setInspection(null)
     setInspectionError(null)
@@ -119,24 +124,14 @@ export function UserTracePanel({
     else setInspectionError(inspectionResult.error)
   }
 
-  function updateDimension(index: number, value: string) {
+  function updateInputDraft(nextDraft: TensorInputDraft) {
     if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
-    setDimensions((current) => current.map((dimension, currentIndex) => currentIndex === index ? value : dimension))
-  }
-
-  function removeDimension() {
-    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
-    setDimensions((current) => current.slice(0, -1))
-  }
-
-  function addDimension() {
-    if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
-    setDimensions((current) => [...current, '1'])
+    setInputDrafts((current) => current.map((draft) => draft.id === nextDraft.id ? nextDraft : draft))
   }
 
   function submitTrace() {
     const sourceIdentity = activeInspection?.sourceIdentity
-    if (!activeSelectedFile || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || !inputValidation.ok || !constructorValidation.ok || isTraceActive) return
+    if (!activeSelectedFile || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || inputSignatureError || !inputValidation.ok || !constructorValidation.ok || isTraceActive) return
     onClearError()
     rememberTrust(sourceIdentity.contentSha256)
     onRun({
@@ -146,12 +141,9 @@ export function UserTracePanel({
         content_sha256: sourceIdentity.contentSha256,
       },
       constructor: { args: constructorValidation.args, kwargs: constructorValidation.kwargs },
-      inputs: [{
-        kind: 'tensor',
-        shape: inputValidation.shape,
-        dtype: 'float32',
-        generator: 'random_normal',
-      }],
+      inputs: inputValidation.inputs.map(({ draft, validation }) => ({
+        kind: 'tensor', parameter_name: draft.parameterName, shape: validation.shape, dtype: draft.dtype, generator: draft.generator,
+      })),
     })
   }
 
@@ -159,6 +151,9 @@ export function UserTracePanel({
     if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
     setSelectedClass(candidate.className)
     setConstructorFields(initialConstructorFields(candidate.constructor.parameters))
+    const drafts = createInputDrafts(candidate.forward)
+    setInputDrafts(drafts.ok ? drafts.drafts : [])
+    setInputSignatureError(drafts.ok ? null : drafts.message)
   }
 
   function updateConstructorField(name: string, update: Partial<ConstructorFieldState>) {
@@ -273,15 +268,11 @@ export function UserTracePanel({
         </section>
 
         <section className="user-trace-section">
-          <div className="user-trace-section-heading"><div><span>4</span><strong>Representative input</strong></div></div>
-          <div className="dimension-editor">
-            {dimensions.map((dimension, index) => (
-              <label key={index}>Dim {index + 1}<input type="number" min="1" step="1" value={dimension} disabled={isTraceActive} onChange={(event) => updateDimension(index, event.target.value)} /></label>
-            ))}
-            <button type="button" aria-label="Remove dimension" disabled={dimensions.length === 1 || isTraceActive} onClick={removeDimension}>-</button>
-            <button type="button" aria-label="Add dimension" disabled={dimensions.length >= MAX_TENSOR_DIMENSIONS || isTraceActive} onClick={addDimension}>+</button>
-          </div>
-          <div className="input-spec-summary"><span>CPU</span><span>float32</span><span>random normal</span><strong>{inputValidation.ok ? `${inputValidation.elementCount.toLocaleString()} elements · ${formatBytes(inputValidation.sizeBytes)}` : inputValidation.message}</strong></div>
+          <div className="user-trace-section-heading"><div><span>4</span><strong>Representative inputs</strong></div></div>
+          {inputSignatureError ? <div className="source-error"><strong>Unsupported forward signature</strong><p>{inputSignatureError}</p></div> : null}
+          {!inputSignatureError && inputDrafts.length === 0 ? <p className="source-muted">This model has no required positional inputs.</p> : null}
+          {inputDrafts.map((draft) => <TensorInputEditor key={draft.id} draft={draft} disabled={isTraceActive} onChange={updateInputDraft} />)}
+          {!inputSignatureError ? <div className="input-total"><span>Total input allocation</span><strong>{inputValidation.ok ? formatBytes(inputValidation.totalBytes) : inputValidation.message}</strong></div> : null}
         </section>
 
         <section className="user-trace-section trusted-code-confirmation">
@@ -316,7 +307,7 @@ export function UserTracePanel({
 
         <footer>
           <span className="toolbar-status">{traceState !== 'idle' ? traceState : 'ready'}</span>
-          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSelectedFile || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || !constructorValidation.ok || !inputValidation.ok || isTraceActive}>Run Trace</button>
+          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSelectedFile || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || Boolean(inputSignatureError) || !constructorValidation.ok || !inputValidation.ok || isTraceActive}>Run Trace</button>
         </footer>
           </>
         )}

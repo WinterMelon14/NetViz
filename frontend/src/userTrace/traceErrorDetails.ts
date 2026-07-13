@@ -46,3 +46,22 @@ export function technicalErrorDetails(failure: TraceFailure, includeTraceback: b
   }
 }
 
+export type SuppliedInputDetail = { index: number; parameterName: string; shape: number[]; dtype: string; generator: string; estimatedBytes: number }
+
+export function suppliedInputDetails(failure: TraceFailure): SuppliedInputDetail[] {
+  const inputs = failure.error.details?.inputs
+  if (!Array.isArray(inputs)) return []
+  return inputs.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const item = value as Record<string, unknown>
+    if (typeof item.index !== 'number' || typeof item.parameter_name !== 'string' || !Array.isArray(item.shape) || !item.shape.every((dimension) => typeof dimension === 'number')) return []
+    return [{
+      index: item.index,
+      parameterName: item.parameter_name,
+      shape: item.shape,
+      dtype: typeof item.dtype === 'string' ? item.dtype : 'unknown',
+      generator: typeof item.generator === 'string' ? item.generator : 'unknown',
+      estimatedBytes: typeof item.estimated_bytes === 'number' ? item.estimated_bytes : 0,
+    }]
+  })
+}

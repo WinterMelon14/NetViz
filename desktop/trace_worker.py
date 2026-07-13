@@ -1,4 +1,5 @@
 import json
+import math
 import sys
 import traceback
 import uuid
@@ -59,6 +60,19 @@ def load_request(path: str | None):
         request = json.load(request_file)
 
     return request
+
+
+def input_error_details(input_specs: list[dict]) -> dict:
+    return {
+        "inputs": [{
+            "index": index,
+            "parameter_name": spec["parameter_name"],
+            "shape": spec["shape"],
+            "dtype": spec["dtype"],
+            "generator": spec["generator"],
+            "estimated_bytes": math.prod(spec["shape"]) * 4,
+        } for index, spec in enumerate(input_specs)]
+    }
 
 
 def run_trace(request_path: str | None = None):
@@ -124,6 +138,7 @@ def run_trace(request_path: str | None = None):
             "Model trace failed",
             str(exc),
             "forward_trace",
+            input_error_details(request["inputs"]),
             exc=exc,
         )
 

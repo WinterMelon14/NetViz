@@ -57,6 +57,7 @@ class UserTraceRuntimeTests(unittest.TestCase):
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [{
                 "kind": "tensor",
+                "parameter_name": "x",
                 "shape": [1, 4],
                 "dtype": "float32",
                 "generator": "random_normal",
@@ -82,6 +83,7 @@ class UserTraceRuntimeTests(unittest.TestCase):
             "constructor": {"args": [], "kwargs": {}},
             "inputs": [{
                 "kind": "tensor",
+                "parameter_name": "x",
                 "shape": [1, 4],
                 "dtype": "float32",
                 "generator": "random_normal",
@@ -335,6 +337,73 @@ class UserTraceRuntimeTests(unittest.TestCase):
         self.assertEqual(result["trace"]["transfer"], "file")
         consumed = manager.consume_trace_file(result["run_id"], result["trace"]["path"])
         self.assertTrue(consumed["ok"])
+
+    def test_two_inputs_trace_in_declared_order_and_support_file_transport(self):
+        request = self.fixture_bridge_request("two_input_model.py", "two-input")
+        request["inputs"] = [
+            {**request["inputs"][0], "parameter_name": "left", "shape": [1, 2]},
+            {**request["inputs"][0], "parameter_name": "right", "shape": [2, 3]},
+        ]
+        manager = TraceRunManager(timeout_seconds=20)
+        result = manager.run_user_trace(request)
+        self.assertEqual(result["type"], "success")
+
+        request["run_id"] = "two-input-file"
+        with patch("desktop.trace_worker.MAX_INLINE_TRACE_BYTES", 1):
+            direct = self.worker_request("two-input-direct")
+            direct["source"] = request["source"]
+            direct["inputs"] = request["inputs"]
+            file_result = run_trace(str(self.write_request(direct)))
+        self.assertEqual(file_result["trace"]["transfer"], "file")
+
+    def test_second_input_mismatch_reports_all_supplied_specs(self):
+        request = self.worker_request("second-input-mismatch")
+        fixture_path = FIXTURE_ROOT / "two_input_model.py"
+        request["source"] = {
+            "file_path": str(fixture_path),
+            "class_name": "UserModel",
+            "content_sha256": hashlib.sha256(fixture_path.read_bytes()).hexdigest(),
+        }
+        request["inputs"] = [
+            {**request["inputs"][0], "parameter_name": "left", "shape": [1, 2]},
+            {**request["inputs"][0], "parameter_name": "right", "shape": [3, 3]},
+        ]
+        result = run_trace(str(self.write_request(request)))
+        self.assertEqual(result["error"]["code"], "trace_execution_failed")
+        self.assertEqual([item["parameter_name"] for item in result["error"]["details"]["inputs"]], ["left", "right"])
+        self.assertNotIn("values", result["error"]["details"]["inputs"][0])
+
+    def test_zero_input_model_traces(self):
+        self.source_path.write_text(
+            "import torch\nclass UserModel(torch.nn.Module):\n    def forward(self): return torch.tensor([1.0])\n",
+            encoding="utf-8",
+        )
+        request = self.worker_request("zero-input")
+        request["inputs"] = []
+        self.assertEqual(run_trace(str(self.write_request(request)))["type"], "success")
+
+    def test_multi_input_cancellation_allows_recovery(self):
+        self.source_path.write_text(
+            "import time\nimport torch\nclass UserModel(torch.nn.Module):\n"
+            "    def forward(self, left, right):\n        time.sleep(60)\n        return left + right\n",
+            encoding="utf-8",
+        )
+        manager = TraceRunManager(timeout_seconds=20)
+        request = self.bridge_request("cancel-multi")
+        request["inputs"] = [
+            {**request["inputs"][0], "parameter_name": "left"},
+            {**request["inputs"][0], "parameter_name": "right"},
+        ]
+        result: dict = {}
+        thread = threading.Thread(target=lambda: result.update(manager.run_user_trace(request)))
+        thread.start()
+        deadline = time.time() + 3
+        while time.time() < deadline and not manager._active_runs:
+            time.sleep(0.01)
+        manager.cancel_trace("cancel-multi")
+        thread.join(timeout=4)
+        self.assertEqual(result["error"]["code"], "cancelled")
+        self.assertEqual(manager.run_user_trace(self.fixture_bridge_request("valid_model.py", "after-cancel-multi"))["type"], "success")
 
 
 if __name__ == "__main__":

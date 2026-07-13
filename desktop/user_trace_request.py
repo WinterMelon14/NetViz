@@ -140,15 +140,18 @@ def validate_user_trace_request(
     inputs = request.get("inputs")
     if not isinstance(inputs, list):
         raise UserTraceRequestError("inputs", "must be an array")
-    if len(inputs) != MAX_USER_INPUTS:
-        raise UserTraceRequestError("inputs", f"must contain exactly {MAX_USER_INPUTS} tensor input")
+    if len(inputs) > MAX_USER_INPUTS:
+        raise UserTraceRequestError("inputs", f"must contain at most {MAX_USER_INPUTS} tensor inputs")
 
     total_bytes = 0
     normalized_inputs: list[dict[str, Any]] = []
     for index, raw_input in enumerate(inputs):
         path = f"inputs[{index}]"
         input_spec = _object(raw_input, path)
-        _exact_fields(input_spec, {"kind", "shape", "dtype", "generator"}, path)
+        _exact_fields(input_spec, {"kind", "parameter_name", "shape", "dtype", "generator"}, path)
+        parameter_name = _non_empty_string(input_spec.get("parameter_name"), f"{path}.parameter_name")
+        if not parameter_name.isidentifier():
+            raise UserTraceRequestError(f"{path}.parameter_name", "must be a Python identifier")
         if input_spec.get("kind") != "tensor":
             raise UserTraceRequestError(f"{path}.kind", "must equal 'tensor'")
         shape = input_spec.get("shape")
@@ -180,6 +183,7 @@ def validate_user_trace_request(
         total_bytes += element_count * FLOAT32_BYTES
         normalized_inputs.append({
             "kind": "tensor",
+            "parameter_name": parameter_name,
             "shape": list(shape),
             "dtype": dtype,
             "generator": generator,

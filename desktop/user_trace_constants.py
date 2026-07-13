@@ -1,7 +1,7 @@
 """Tunable safety and lifecycle limits for local user-model tracing."""
 
 # Bounds representative tensor allocation before PyTorch is invoked.
-MAX_USER_INPUTS = 1
+MAX_USER_INPUTS = 8
 MAX_TENSOR_DIMENSIONS = 8
 MAX_TENSOR_ELEMENTS = 16_777_216
 MAX_TOTAL_INPUT_BYTES = 64 * 1024 * 1024
