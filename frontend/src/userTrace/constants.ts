@@ -8,6 +8,11 @@ export const DEFAULT_INTEGER_MAX_EXCLUSIVE = 10
 export const DEFAULT_IMAGE_SPATIAL_SIZE = 224
 export const DEFAULT_SEQUENCE_LENGTH = 128
 export const MAX_USER_INPUTS = 8
+export const MAX_STRUCTURED_INPUT_DEPTH = 8
+export const MAX_STRUCTURED_CONTAINER_ITEMS = 128
+export const MAX_STRUCTURED_INPUT_VALUES = 1_024
+export const MAX_INPUT_STRING_CHARS = 64 * 1024
+export const MAX_INPUT_SERIALIZED_BYTES = 256 * 1024
 
 // Bounds JSON-safe constructor values consistently with worker validation.
 export const MAX_CONSTRUCTOR_LITERAL_DEPTH = 8

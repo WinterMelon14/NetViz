@@ -10,13 +10,18 @@ import { formatBytes } from './inputConfig.ts'
 import { LoadingIndicator } from '../components/LoadingIndicator.tsx'
 import { TraceErrorCard } from './TraceErrorCard.tsx'
 import type { TraceFailure } from './traceErrorDetails.ts'
-import { createInputDrafts, validateInputDrafts, type TensorInputDraft } from './inputDrafts.ts'
-import { TensorInputEditor } from './TensorInputEditor.tsx'
-import { MAX_TOTAL_INPUT_BYTES } from './constants.ts'
 import { applyErrorInputSuggestion as applyInputSuggestion, suggestFromTraceError } from './errorInputSuggestions.ts'
 import { SourceInputStep, type SourceMode } from './SourceInputStep.tsx'
 import { CompatibilityReportPanel } from './CompatibilityReportPanel.tsx'
 import { blockingCompatibilityFindings, compatibilityFindingKey, isCompatibilityFindingResolved } from './compatibilityState.ts'
+import { StructuredInputEditor } from './StructuredInputEditor.tsx'
+import {
+  createStructuredInputDrafts,
+  replaceTopLevelTensorDrafts,
+  topLevelTensorDrafts,
+  validateStructuredInputDrafts,
+  type ParameterInputDraft,
+} from './structuredInputDrafts.ts'
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
 
@@ -64,8 +69,9 @@ export function UserTracePanel({
   const [selectedClass, setSelectedClass] = useState<string | null>(null)
   const [constructorFields, setConstructorFields] = useState<Record<string, ConstructorFieldState>>({})
   const [trustedCodeConfirmed, setTrustedCodeConfirmed] = useState(false)
-  const [inputDrafts, setInputDrafts] = useState<TensorInputDraft[]>([])
+  const [inputDrafts, setInputDrafts] = useState<ParameterInputDraft[]>([])
   const [inputSignatureError, setInputSignatureError] = useState<string | null>(null)
+  const [inputSignatureNotice, setInputSignatureNotice] = useState<string | null>(null)
   const [useProviderInputs, setUseProviderInputs] = useState(false)
   const [isSelecting, setIsSelecting] = useState(false)
   const [isInspecting, setIsInspecting] = useState(false)
@@ -79,14 +85,15 @@ export function UserTracePanel({
   const activeInspection = isSourceInvalidated || isSelectionInvalidated ? null : inspection
   const selectedCandidate = activeInspection?.candidates.find((candidate) => candidate.className === selectedClass) ?? null
   const constructorValidation = buildConstructorConfig(selectedCandidate?.constructor.parameters ?? [], constructorFields)
-  const inputValidation = validateInputDrafts(inputDrafts, MAX_TOTAL_INPUT_BYTES)
-  const errorInputSuggestion = traceFailure ? suggestFromTraceError(traceFailure, inputDrafts) : null
+  const inputValidation = validateStructuredInputDrafts(inputDrafts)
+  const tensorInputDrafts = topLevelTensorDrafts(inputDrafts)
+  const errorInputSuggestion = traceFailure ? suggestFromTraceError(traceFailure, tensorInputDrafts) : null
   const isTraceActive = traceState === 'starting' || traceState === 'running' || traceState === 'cancelling'
   const compatibilityConfiguration = {
     constructorFields,
     inputDrafts,
     constructorValid: constructorValidation.ok,
-    inputsValid: inputValidation.ok && !inputSignatureError,
+    inputsValid: useProviderInputs || (inputValidation.ok && !inputSignatureError),
     useProviderInputs,
   }
   const compatibilityFindings = selectedCandidate?.compatibilityReport.findings ?? []
@@ -115,6 +122,7 @@ export function UserTracePanel({
     setConstructorFields({})
     setInputDrafts([])
     setInputSignatureError(null)
+    setInputSignatureNotice(null)
     setUseProviderInputs(false)
     setTrustedCodeConfirmed(false)
     setInspection(null)
@@ -160,6 +168,7 @@ export function UserTracePanel({
     setConstructorFields({})
     setInputDrafts([])
     setInputSignatureError(null)
+    setInputSignatureNotice(null)
     setUseProviderInputs(false)
     setTrustedCodeConfirmed(false)
     setInspection(null)
@@ -221,28 +230,21 @@ export function UserTracePanel({
     resetSourceConfiguration()
   }
 
-  function updateInputDraft(nextDraft: TensorInputDraft) {
+  function updateInputDraft(nextDraft: ParameterInputDraft) {
     if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
     setInputDrafts((current) => current.map((draft) => draft.id === nextDraft.id ? nextDraft : draft))
   }
 
   function applyErrorInputSuggestion() {
     if (!errorInputSuggestion) return
-    setInputDrafts((current) => applyInputSuggestion(current, errorInputSuggestion))
+    setInputDrafts((current) => replaceTopLevelTensorDrafts(current, applyInputSuggestion(topLevelTensorDrafts(current), errorInputSuggestion)))
     onClearError()
   }
 
   function submitTrace() {
     const sourceIdentity = activeInspection?.sourceIdentity
     if (!activeSource || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || compatibilityBlockers.length || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive) return
-    const configuredInputs = inputValidation.ok ? inputValidation.inputs.map(({ draft, validation }) => ({
-      kind: 'tensor' as const,
-      parameter_name: draft.parameterName,
-      shape: validation.shape,
-      dtype: draft.dtype,
-      generator: draft.generator,
-      ...(draft.dtype === 'int64' ? { integer_max_exclusive: draft.integerMaxExclusive! } : {}),
-    })) : []
+    if (!useProviderInputs && !inputValidation.ok) return
     onClearError()
     rememberTrust(sourceIdentity.contentSha256)
     onRun({
@@ -252,7 +254,9 @@ export function UserTracePanel({
         content_sha256: sourceIdentity.contentSha256,
       },
       constructor: { args: constructorValidation.args, kwargs: constructorValidation.kwargs },
-      inputs: useProviderInputs ? [] : configuredInputs,
+      input_schema_version: 2,
+      args: useProviderInputs || !inputValidation.ok ? [] : inputValidation.args,
+      kwargs: useProviderInputs || !inputValidation.ok ? {} : inputValidation.kwargs,
       input_provider: useProviderInputs ? { function_name: 'netviz_example_inputs', parameter_names: inputDrafts.map((draft) => draft.parameterName) } : null,
     })
   }
@@ -261,9 +265,10 @@ export function UserTracePanel({
     if (!isSourceInvalidated && !isSelectionInvalidated) onClearError()
     setSelectedClass(candidate.className)
     setConstructorFields(initialConstructorFields(candidate.constructor.parameters))
-    const drafts = createInputDrafts(candidate.forward)
+    const drafts = createStructuredInputDrafts(candidate.forward)
     setInputDrafts(drafts.ok ? drafts.drafts : [])
     setInputSignatureError(drafts.ok ? null : drafts.message)
+    setInputSignatureNotice(drafts.ok ? drafts.variadicNotice : null)
     setUseProviderInputs(false)
   }
 
@@ -378,9 +383,10 @@ export function UserTracePanel({
           {activeInspection?.exampleInputProvider ? <label className="provider-input-toggle"><input type="checkbox" checked={useProviderInputs} onChange={(event) => { onClearError(); setUseProviderInputs(event.target.checked) }} />Use tensors from netviz_example_inputs()</label> : null}
           {useProviderInputs ? <p className="source-muted">The trusted worker will execute and validate the model-provided tensor sequence.</p> : null}
           {!useProviderInputs && inputSignatureError ? <div className="source-error"><strong>Unsupported forward signature</strong><p>{inputSignatureError}</p></div> : null}
-          {!useProviderInputs && !inputSignatureError && inputDrafts.length === 0 ? <p className="source-muted">This model has no required positional inputs.</p> : null}
-          {!useProviderInputs ? inputDrafts.map((draft) => <TensorInputEditor key={draft.id} draft={draft} disabled={isTraceActive} onChange={updateInputDraft} />) : null}
-          {!useProviderInputs && !inputSignatureError ? <div className="input-total"><span>Total input allocation</span><strong>{inputValidation.ok ? formatBytes(inputValidation.totalBytes) : inputValidation.message}</strong></div> : null}
+          {!useProviderInputs && inputSignatureNotice ? <p className="source-muted">{inputSignatureNotice}</p> : null}
+          {!useProviderInputs && !inputSignatureError && inputDrafts.length === 0 ? <p className="source-muted">This model has no configurable forward parameters.</p> : null}
+          {!useProviderInputs ? inputDrafts.map((draft) => <StructuredInputEditor key={draft.id} draft={draft} disabled={isTraceActive} onChange={updateInputDraft} />) : null}
+          {!useProviderInputs && !inputSignatureError ? <div className="input-total"><span>Structured input allocation</span><strong>{inputValidation.ok ? `${inputValidation.tensorCount} tensors · ${inputValidation.valueCount} values · ${formatBytes(inputValidation.totalBytes)}` : `${inputValidation.path}: ${inputValidation.message}`}</strong></div> : null}
           {errorInputSuggestion ? <div className="input-recovery-suggestion"><span>{errorInputSuggestion.message}</span><button type="button" onClick={applyErrorInputSuggestion}>Apply Suggestion</button></div> : null}
         </section>
 

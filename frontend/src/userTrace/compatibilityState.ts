@@ -1,10 +1,10 @@
 import type { CompatibilityFinding } from '../desktop/sourceInspectionApi.ts'
 import type { ConstructorFieldState } from './constructorConfig.ts'
-import type { TensorInputDraft } from './inputDrafts.ts'
+import type { ParameterInputDraft } from './structuredInputDrafts.ts'
 
 export type CompatibilityConfiguration = {
   constructorFields: Record<string, ConstructorFieldState>
-  inputDrafts: TensorInputDraft[]
+  inputDrafts: ParameterInputDraft[]
   constructorValid: boolean
   inputsValid: boolean
   useProviderInputs: boolean
@@ -22,7 +22,7 @@ export function isCompatibilityFindingResolved(finding: CompatibilityFinding, co
     return configuration.constructorValid && Boolean(field?.enabled && field.text.trim())
   }
   if (target?.kind === 'forward_parameter' && target.name) {
-    return configuration.useProviderInputs || (configuration.inputsValid && configuration.inputDrafts.some((draft) => draft.parameterName === target.name))
+    return configuration.useProviderInputs || (configuration.inputsValid && configuration.inputDrafts.some((draft) => draft.parameterName === target.name && draft.included))
   }
   return false
 }

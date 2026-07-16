@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from desktop.trace_protocol import PROTOCOL_VERSION
+from desktop.structured_inputs import StructuredInputError, validate_structured_call
 from desktop.user_trace_constants import (
     DEFAULT_INTEGER_MAX_EXCLUSIVE,
     MAX_CONSTRUCTOR_LITERAL_DEPTH,
@@ -107,11 +108,11 @@ def validate_user_trace_request(
     expected_output_path: Path | None = None,
 ) -> dict[str, Any]:
     request = _object(value, "request")
-    _exact_fields(
-        request,
-        {"protocol_version", "run_id", "source", "constructor", "inputs", "input_provider", "output_path"},
-        "request",
-    )
+    input_schema_version = request.get("input_schema_version", 1)
+    if input_schema_version not in {1, 2}:
+        raise UserTraceRequestError("input_schema_version", "must equal 1 or 2")
+    input_fields = {"inputs"} if input_schema_version == 1 else {"args", "kwargs"}
+    _exact_fields(request, {"protocol_version", "input_schema_version", "run_id", "source", "constructor", "input_provider", "output_path"} | input_fields, "request")
 
     if request.get("protocol_version") != PROTOCOL_VERSION:
         raise UserTraceRequestError("protocol_version", f"must equal {PROTOCOL_VERSION}")
@@ -150,7 +151,7 @@ def validate_user_trace_request(
             raise UserTraceRequestError("input_provider.parameter_names", f"must contain at most {MAX_USER_INPUTS} Python identifiers")
         normalized_provider = {"function_name": "netviz_example_inputs", "parameter_names": list(parameter_names)}
 
-    inputs = request.get("inputs")
+    inputs = request.get("inputs") if input_schema_version == 1 else []
     if not isinstance(inputs, list):
         raise UserTraceRequestError("inputs", "must be an array")
     if len(inputs) > MAX_USER_INPUTS:
@@ -220,6 +221,16 @@ def validate_user_trace_request(
             f"require {total_bytes} bytes; maximum is {MAX_TOTAL_INPUT_BYTES}",
         )
 
+    normalized_args: list[dict[str, Any]] = []
+    normalized_kwargs: dict[str, dict[str, Any]] = {}
+    if input_schema_version == 2:
+        try:
+            normalized_args, normalized_kwargs = validate_structured_call(request.get("args"), request.get("kwargs"))
+        except StructuredInputError as exc:
+            raise UserTraceRequestError(exc.path, exc.message) from exc
+        if normalized_provider is not None and (normalized_args or normalized_kwargs):
+            raise UserTraceRequestError("args", "args and kwargs must be empty when input_provider is configured")
+
     output_path_text = _non_empty_string(request.get("output_path"), "output_path")
     output_path = Path(output_path_text)
     if expected_output_path is not None and output_path != expected_output_path:
@@ -227,10 +238,13 @@ def validate_user_trace_request(
 
     return {
         "protocol_version": PROTOCOL_VERSION,
+        "input_schema_version": input_schema_version,
         "run_id": run_id,
         "source": {"file_path": str(file_path), "class_name": class_name, "content_sha256": content_sha256},
         "constructor": constructor,
         "inputs": normalized_inputs,
+        "args": normalized_args,
+        "kwargs": normalized_kwargs,
         "input_provider": normalized_provider,
         "output_path": str(output_path),
     }

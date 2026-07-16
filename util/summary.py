@@ -1,5 +1,6 @@
 import torch
 import torch.fx as fx
+import inspect
 import warnings
 from torch.fx.passes.shape_prop import ShapeProp
 from util.Interpreter import SummaryInterpreter
@@ -9,6 +10,24 @@ from util.util import *
 # ============================================================
 # Main API
 # ============================================================
+
+def _bind_interpreter_args(gm, example_args, example_kwargs):
+    """Order keyword arguments for torch.fx.Interpreter placeholder execution."""
+    if not example_kwargs:
+        return list(example_args)
+    signature = inspect.signature(gm.forward)
+    bound = signature.bind(*example_args, **example_kwargs)
+    bound.apply_defaults()
+    ordered = []
+    for parameter in signature.parameters.values():
+        value = bound.arguments.get(parameter.name)
+        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
+            ordered.extend(value or ())
+        elif parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            ordered.append(value or {})
+        else:
+            ordered.append(value)
+    return ordered
 
 def model_summary(
     model_or_gm,
@@ -48,7 +67,7 @@ def model_summary(
     interp = SummaryInterpreter(gm, max_preview_items=max_preview_items)
 
     with torch.no_grad():
-        interp.run(*example_args, **example_kwargs)
+        interp.run(*_bind_interpreter_args(gm, example_args, example_kwargs))
 
     nodes = []
     edges = []

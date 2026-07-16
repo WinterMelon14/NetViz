@@ -28,8 +28,8 @@ export function TensorInputEditor({ draft, disabled, onChange }: { draft: Tensor
   }
 
   return (
-    <section className="tensor-input-editor" id={`forward-parameter-${draft.parameterName}`} tabIndex={-1}>
-      <header><strong>{draft.parameterName}</strong><span>positional tensor</span></header>
+    <section className="tensor-input-editor">
+      <header><strong>Tensor</strong><span>{draft.parameterName}</span></header>
       <div className="dimension-editor">
         {draft.dimensions.map((dimension, index) => (
           <label key={index}>

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from desktop.user_model_runtime import (
     UserTraceRuntimeError,
+    build_structured_inputs,
     build_tensor_inputs,
     build_provider_inputs,
     instantiate_model,
@@ -70,7 +71,7 @@ def input_error_details(input_specs: list[dict]) -> dict:
             "shape": spec["shape"],
             "dtype": spec["dtype"],
             "generator": spec["generator"],
-            "estimated_bytes": math.prod(spec["shape"]) * TENSOR_DTYPE_BYTES[spec["dtype"]],
+            "estimated_bytes": spec.get("estimated_bytes", math.prod(spec["shape"]) * TENSOR_DTYPE_BYTES[spec["dtype"]]),
         } for index, spec in enumerate(input_specs)]
     }
 
@@ -116,13 +117,16 @@ def run_trace(request_path: str | None = None):
                 request["constructor"]["kwargs"],
             )
             if request["input_provider"]:
-                example_inputs, diagnostic_specs = build_provider_inputs(module, request["input_provider"])
+                example_args, example_kwargs, diagnostic_specs = build_provider_inputs(module, request["input_provider"])
+            elif request["input_schema_version"] == 2:
+                example_args, example_kwargs, diagnostic_specs = build_structured_inputs(request["args"], request["kwargs"])
             else:
-                example_inputs = build_tensor_inputs(request["inputs"])
+                example_args = build_tensor_inputs(request["inputs"])
+                example_kwargs = {}
                 diagnostic_specs = request["inputs"]
             from util.summary import model_summary
 
-            payload = model_summary(model, *example_inputs, run_shape_prop=False)
+            payload = model_summary(model, *example_args, example_kwargs=example_kwargs, run_shape_prop=False)
             return trace_success_for_transport(run_id, payload, request.get("output_path"))
     except UserTraceRuntimeError as exc:
         return trace_error(

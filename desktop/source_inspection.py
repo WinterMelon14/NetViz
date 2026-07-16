@@ -271,8 +271,6 @@ def inspect_parameters(args: ast.arguments, context: str) -> tuple[list[dict[str
 def parameter_result(argument: ast.arg, position: str, default: ast.expr | None, context: str) -> dict[str, Any]:
     required = default is None
     status = "configuration_required" if required else "supported"
-    if context == "forward" and required and position == "keyword_only":
-        status = "unsupported"
     result: dict[str, Any] = {
         "name": argument.arg,
         "position": position,

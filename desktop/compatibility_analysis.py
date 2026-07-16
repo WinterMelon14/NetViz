@@ -73,8 +73,6 @@ def _parameter_findings(category: str, parameters: list[dict[str, Any]]) -> list
         line = parameter.get("lineNumber")
         if not parameter["required"]:
             items.append(finding(category, f"{category}_parameter_optional", "supported", f"{name} may be omitted", "The declaration provides a default, so NetViz may leave this parameter out of the call.", "source", source_evidence(parameter.get("declaration", name), line), target=target))
-        elif category == "forward" and parameter["position"] == "keyword_only":
-            items.append(finding(category, "forward_required_keyword_only", "unsupported", f"{name} is required and keyword-only", "The current v1 input request sends representative tensors positionally.", "source", source_evidence(parameter.get("declaration", name), line), "Structured keyword inputs are planned for NV-006 and NV-007.", target))
         else:
             items.append(finding(category, f"{category}_parameter_configuration_required", "configuration_required", f"Configure {name}", "A representative value must be confirmed before execution.", "source", source_evidence(parameter.get("declaration", name), line), "Complete the matching configuration field.", target))
     return items
