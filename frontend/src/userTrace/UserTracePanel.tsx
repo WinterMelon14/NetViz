@@ -47,6 +47,7 @@ function rememberTrust(contentSha256: string) {
 }
 
 export function UserTracePanel({
+  isOpen,
   traceState,
   traceFailure,
   onRun,
@@ -54,6 +55,7 @@ export function UserTracePanel({
   onClearError,
   onClose,
 }: {
+  isOpen: boolean
   traceState: TraceRunState
   traceFailure: TraceFailure | null
   onRun: (request: UserTraceDraft) => void
@@ -285,6 +287,8 @@ export function UserTracePanel({
     : traceState === 'cancelling'
       ? 'Cancelling...'
       : 'Tracing model...'
+
+  if (!isOpen) return null
 
   return (
     <div className="modal-backdrop" role="presentation">

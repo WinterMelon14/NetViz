@@ -21,3 +21,9 @@ export const maxScale = 2.4
 
 // Extra draggable canvas space around the graph so users can pan past edge nodes.
 export const whiteboardPadding = 1800
+
+// ReLU naturally produces many zeros, so only flag unusually extreme sparsity.
+export const sparseReluThresholdPercent = 90
+
+// Other operations are flagged when more than this percentage of outputs are zero.
+export const sparseDefaultThresholdPercent = 5

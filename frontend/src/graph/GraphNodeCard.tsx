@@ -6,6 +6,7 @@ import { ShapePill } from '../components/ShapePill'
 import { explainNode } from '../explanations'
 import { primaryInput, primaryOutput } from '../trace/selectors'
 import { kindBadge, nodeCardWidth, totalParamLabel } from './nodePresentation'
+import { nodeDiagnostics } from './nodeDiagnostics'
 import type { PositionedTraceNode } from './types'
 
 export function GraphNodeCard({
@@ -29,6 +30,7 @@ export function GraphNodeCard({
   const output = primaryOutput(node)
   const isInputNode = node.kind === 'input'
   const explanation = isInputNode ? null : explainNode(node)
+  const diagnostics = nodeDiagnostics(node)
 
   return (
     <button
@@ -60,7 +62,12 @@ export function GraphNodeCard({
       <span className="node-label">
         {isInputNode ? <ShapePill shape={output?.shape} /> : <ShapeFlow input={input?.shape} output={output?.shape} />}
       </span>
-      <span className="node-kind">{node.kind}</span>
+      <span className="node-status-row">
+        <span className="node-kind">{node.kind}</span>
+        {diagnostics.hasNan ? <span className="node-warning-badge node-warning-badge--danger" title="Observed NaN in node output">NaN</span> : null}
+        {diagnostics.hasInf ? <span className="node-warning-badge node-warning-badge--danger" title="Observed infinity in node output">Inf</span> : null}
+        {diagnostics.sparsePercent !== null ? <span className="node-warning-badge node-warning-badge--sparse" title={`${diagnostics.sparsePercent.toFixed(1)}% of output values are zero`}>Sparse {Math.round(diagnostics.sparsePercent)}%</span> : null}
+      </span>
       {isInputNode ? null : <span className="node-param">{totalParamLabel(node)} / {output?.memory?.human ?? '0 B'} act</span>}
     </button>
   )

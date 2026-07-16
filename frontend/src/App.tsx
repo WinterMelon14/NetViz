@@ -238,8 +238,10 @@ function App() {
     isLayoutPending,
     hasRecoveryError: Boolean(recoveryError),
   })
-  const tracePanel = isUserTraceOpen ? (
+  const tracePanel = (
     <UserTracePanel
+      key="user-trace-panel"
+      isOpen={isUserTraceOpen}
       traceState={desktopTraceState}
       traceFailure={desktopTraceFailure}
       onRun={runSelectedModelTrace}
@@ -247,7 +249,7 @@ function App() {
       onClearError={clearDesktopTraceError}
       onClose={() => setIsUserTraceOpen(false)}
     />
-  ) : null
+  )
   const fixtureDialog = import.meta.env.DEV && isLoadModalOpen ? (
     <TraceLoadDialog
       jsonText={jsonText}
@@ -259,84 +261,82 @@ function App() {
     />
   ) : null
 
-  if (viewState === 'recovery' && recoveryError) return (
-    <main className={`app-shell ${theme} app-shell--recovery`}>
-      <TraceRecovery
-        message={recoveryError}
-        onTraceModel={openUserTrace}
-        onLoadFixture={openFixtureLoader}
-      />
-      {fixtureDialog}
-      {tracePanel}
-    </main>
-  )
-  if (viewState === 'empty') return (
-    <EmptyTraceState onTraceModel={openUserTrace} onLoadFixture={openFixtureLoader}>
-      {fixtureDialog}
-      {tracePanel}
-    </EmptyTraceState>
-  )
-  if (viewState === 'layout' || !trace || !layout) return (
-    <>
-      <main className={`app-shell ${theme} app-shell--message`}>Preparing graph...</main>
-      {tracePanel}
-    </>
-  )
+  let applicationView
+  if (viewState === 'recovery' && recoveryError) {
+    applicationView = (
+      <main className={`app-shell ${theme} app-shell--recovery`}>
+        <TraceRecovery
+          message={recoveryError}
+          onTraceModel={openUserTrace}
+          onLoadFixture={openFixtureLoader}
+        />
+      </main>
+    )
+  } else if (viewState === 'empty') {
+    applicationView = <EmptyTraceState onTraceModel={openUserTrace} onLoadFixture={openFixtureLoader} />
+  } else if (viewState === 'layout' || !trace || !layout) {
+    applicationView = <main className={`app-shell ${theme} app-shell--message`}>Preparing graph...</main>
+  } else {
+    applicationView = (
+      <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
+        <Topbar
+          modelName={trace.model_name}
+          onOpenUserTrace={openUserTrace}
+          onFitGraph={resetGraphPositions}
+          onLoadFixture={openFixtureLoader}
+        />
+
+        <GraphPanel
+          modelName={trace.model_name}
+          viewportRef={viewportRef}
+          nodes={layoutNodes}
+          edges={trace.graph.edges}
+          nodesById={nodesById}
+          outputNodeIds={outputNodeIds}
+          stageBounds={stageBounds}
+          view={view}
+          selectedNodeId={selectedNodeId}
+          isDraggingNode={isDraggingNode}
+          onViewportPointerDown={onViewportPointerDown}
+          onViewportPointerMove={onViewportPointerMove}
+          onViewportPointerUp={onViewportPointerUp}
+          onNodePointerDown={onNodePointerDown}
+          onNodePointerMove={onNodePointerMove}
+          onNodePointerUp={onNodePointerUp}
+          onSelectNode={selectNode}
+        />
+
+        <aside ref={inspectorRef} className="inspector" aria-label="Node inspector">
+          {inspectorNode ? (
+            <NodeInspector
+              node={inspectorNode}
+              incomingEdges={incomingEdgesByNode.get(inspectorNode.id) ?? []}
+              outgoingEdges={outgoingEdgesByNode.get(inspectorNode.id) ?? []}
+              onFocusNode={(nodeId) => focusNode(nodeId, { centerCamera: true })}
+            />
+          ) : (
+            <ModelSummary trace={trace} outputNodes={outputNodes} />
+          )}
+        </aside>
+
+        <button
+          type="button"
+          className="inspector-handle"
+          aria-label={isInspectorOpen ? 'Collapse inspector' : 'Expand inspector'}
+          onClick={() => setIsInspectorOpen((open) => !open)}
+        >
+          {isInspectorOpen ? '>' : '<'}
+        </button>
+      </main>
+    )
+  }
 
   return (
-    <main className={`app-shell ${theme} ${isInspectorOpen ? '' : 'inspector-collapsed'}`}>
-      <Topbar
-        modelName={trace.model_name}
-        onOpenUserTrace={openUserTrace}
-        onFitGraph={resetGraphPositions}
-        onLoadFixture={openFixtureLoader}
-      />
-
-      <GraphPanel
-        modelName={trace.model_name}
-        viewportRef={viewportRef}
-        nodes={layoutNodes}
-        edges={trace.graph.edges}
-        nodesById={nodesById}
-        outputNodeIds={outputNodeIds}
-        stageBounds={stageBounds}
-        view={view}
-        selectedNodeId={selectedNodeId}
-        isDraggingNode={isDraggingNode}
-        onViewportPointerDown={onViewportPointerDown}
-        onViewportPointerMove={onViewportPointerMove}
-        onViewportPointerUp={onViewportPointerUp}
-        onNodePointerDown={onNodePointerDown}
-        onNodePointerMove={onNodePointerMove}
-        onNodePointerUp={onNodePointerUp}
-        onSelectNode={selectNode}
-      />
-
-      <aside ref={inspectorRef} className="inspector" aria-label="Node inspector">
-        {inspectorNode ? (
-          <NodeInspector
-            node={inspectorNode}
-            incomingEdges={incomingEdgesByNode.get(inspectorNode.id) ?? []}
-            outgoingEdges={outgoingEdgesByNode.get(inspectorNode.id) ?? []}
-            onFocusNode={(nodeId) => focusNode(nodeId, { centerCamera: true })}
-          />
-        ) : (
-          <ModelSummary trace={trace} outputNodes={outputNodes} />
-        )}
-      </aside>
-
-      <button
-        type="button"
-        className="inspector-handle"
-        aria-label={isInspectorOpen ? 'Collapse inspector' : 'Expand inspector'}
-        onClick={() => setIsInspectorOpen((open) => !open)}
-      >
-        {isInspectorOpen ? '>' : '<'}
-      </button>
-
+    <div className={`app-root app-shell ${theme}`}>
+      {applicationView}
       {fixtureDialog}
       {tracePanel}
-    </main>
+    </div>
   )
 }
 

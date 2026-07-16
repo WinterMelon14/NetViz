@@ -485,6 +485,38 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
+.app-root.app-shell {
+  display: contents;
+}
+
+.node-status-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.node-warning-badge {
+  padding: 3px 5px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 850;
+}
+
+.node-warning-badge--danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+
+.node-warning-badge--sparse {
+  color: var(--shape-reduced);
+  background: color-mix(in srgb, var(--shape-reduced) 10%, transparent);
+}
+
 .node-shapes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
