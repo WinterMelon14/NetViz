@@ -1,5 +1,6 @@
 import ast
 from typing import Any, Literal
+from desktop.compatibility_analysis import build_compatibility_report
 from desktop.input_suggestions import inspect_input_suggestions
 from desktop.user_trace_constants import MAX_SOURCE_CHARS
 
@@ -91,6 +92,7 @@ def inspect_model_source(source_text: str) -> dict[str, Any]:
         for class_node, is_nested in iter_class_definitions(module):
             candidate = inspect_class(class_node, aliases)
             if candidate:
+                candidate["compatibilityReport"] = build_compatibility_report(module, class_node, candidate)
                 candidates.append(candidate)
                 if is_nested:
                     warnings.append({
@@ -213,7 +215,7 @@ def inspect_constructor(class_node: ast.ClassDef) -> dict[str, Any]:
             "parameters": [],
         }
 
-    parameters, _, _ = inspect_parameters(init_method.args)
+    parameters, _, _ = inspect_parameters(init_method.args, "constructor")
     required_parameters = [parameter for parameter in parameters if parameter["required"]]
     return {
         "kind": "explicit",
@@ -227,7 +229,7 @@ def inspect_forward(class_node: ast.ClassDef, aliases: dict[str, Any]) -> dict[s
     if forward is None:
         return None
 
-    parameters, has_varargs, has_kwargs = inspect_parameters(forward.args)
+    parameters, has_varargs, has_kwargs = inspect_parameters(forward.args, "forward")
     result = {
         "parameters": parameters,
         "hasVarArgs": has_varargs,
@@ -249,7 +251,7 @@ def find_method(class_node: ast.ClassDef, name: str) -> ast.FunctionDef | ast.As
     return None
 
 
-def inspect_parameters(args: ast.arguments) -> tuple[list[dict[str, Any]], bool, bool]:
+def inspect_parameters(args: ast.arguments, context: str) -> tuple[list[dict[str, Any]], bool, bool]:
     positional_args = list(args.posonlyargs) + list(args.args)
     positional_defaults = [None] * (len(positional_args) - len(args.defaults)) + list(args.defaults)
     parameters: list[dict[str, Any]] = []
@@ -258,19 +260,27 @@ def inspect_parameters(args: ast.arguments) -> tuple[list[dict[str, Any]], bool,
         if index == 0 and argument.arg == "self":
             continue
         position = "positional_only" if index < len(args.posonlyargs) else "positional_or_keyword"
-        parameters.append(parameter_result(argument, position, default))
+        parameters.append(parameter_result(argument, position, default, context))
 
     for argument, default in zip(args.kwonlyargs, args.kw_defaults):
-        parameters.append(parameter_result(argument, "keyword_only", default))
+        parameters.append(parameter_result(argument, "keyword_only", default, context))
 
     return parameters, args.vararg is not None, args.kwarg is not None
 
 
-def parameter_result(argument: ast.arg, position: str, default: ast.expr | None) -> dict[str, Any]:
+def parameter_result(argument: ast.arg, position: str, default: ast.expr | None, context: str) -> dict[str, Any]:
+    required = default is None
+    status = "configuration_required" if required else "supported"
+    if context == "forward" and required and position == "keyword_only":
+        status = "unsupported"
     result: dict[str, Any] = {
         "name": argument.arg,
         "position": position,
-        "required": default is None,
+        "required": required,
+        "omittable": not required,
+        "compatibilityStatus": status,
+        "lineNumber": argument.lineno,
+        "declaration": safe_unparse(argument),
     }
     if argument.annotation is not None:
         result["annotationText"] = safe_unparse(argument.annotation)
@@ -279,11 +289,26 @@ def parameter_result(argument: ast.arg, position: str, default: ast.expr | None)
         literal = safe_literal(default)
         if literal["isLiteral"]:
             result["defaultValue"] = literal["value"]
+            result["defaultKind"] = default_kind(default)
             if "typeText" not in result:
                 result["typeText"] = literal_type_text(literal["value"])
         else:
             result["defaultDisplay"] = safe_unparse(default)
     return result
+
+
+def default_kind(node: ast.AST) -> str:
+    if isinstance(node, ast.Tuple):
+        return "tuple"
+    if isinstance(node, ast.List):
+        return "list"
+    if isinstance(node, ast.Dict):
+        return "dict"
+    if isinstance(node, ast.Constant):
+        if node.value is None:
+            return "none"
+        return type(node.value).__name__
+    return "expression"
 
 
 def literal_type_text(value: Any) -> str:

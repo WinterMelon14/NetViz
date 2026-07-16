@@ -8,6 +8,44 @@ export type FunctionParameter = {
   typeText?: string
   defaultValue?: SerializableLiteral
   defaultDisplay?: string
+  defaultKind?: 'none' | 'bool' | 'int' | 'float' | 'str' | 'list' | 'tuple' | 'dict' | 'expression'
+  omittable?: boolean
+  compatibilityStatus?: CompatibilityStatus
+  lineNumber?: number
+  declaration?: string
+}
+
+export type CompatibilityStatus = 'supported' | 'configuration_required' | 'unsupported' | 'unknown'
+export type CompatibilityCategory = 'class' | 'constructor' | 'forward' | 'input' | 'import' | 'resource' | 'runtime' | 'fx'
+
+export type CompatibilityEvidence = {
+  kind: string
+  text: string
+  lineNumber?: number
+}
+
+export type CompatibilityTarget = {
+  kind: 'constructor_parameter' | 'forward_parameter' | 'source'
+  name?: string
+}
+
+export type CompatibilityFinding = {
+  category: CompatibilityCategory
+  code: string
+  status: CompatibilityStatus
+  title: string
+  explanation: string
+  origin: 'source' | 'heuristic' | 'runtime'
+  evidence: CompatibilityEvidence[]
+  remediation?: string
+  target?: CompatibilityTarget
+}
+
+export type CompatibilityReport = {
+  schemaVersion: 1
+  className: string
+  findings: CompatibilityFinding[]
+  tracingOutcome: { status: 'unknown'; statement: string }
 }
 
 export type ConstructorInspection = {
@@ -46,6 +84,7 @@ export type ModelCandidate = {
   confidence: 'confirmed' | 'likely' | 'possible'
   constructor: ConstructorInspection
   forward: ForwardSignature | null
+  compatibilityReport: CompatibilityReport
 }
 
 export type SourceInspectionWarning = {
@@ -110,7 +149,14 @@ function isParameter(value: unknown): value is FunctionParameter {
 }
 
 function parseParameters(value: unknown): FunctionParameter[] {
-  return Array.isArray(value) ? value.filter(isParameter) : []
+  return Array.isArray(value) ? value.filter(isParameter).map((parameter) => ({
+    ...parameter,
+    omittable: parameter.omittable === true,
+    compatibilityStatus: isCompatibilityStatus(parameter.compatibilityStatus) ? parameter.compatibilityStatus : undefined,
+    lineNumber: typeof parameter.lineNumber === 'number' ? parameter.lineNumber : undefined,
+    declaration: typeof parameter.declaration === 'string' ? parameter.declaration : undefined,
+    defaultKind: isDefaultKind(parameter.defaultKind) ? parameter.defaultKind : undefined,
+  })) : []
 }
 
 function isCandidate(value: unknown): value is ModelCandidate {
@@ -151,7 +197,62 @@ function normalizeCandidate(value: ModelCandidate): ModelCandidate {
       parameters: parseParameters(value.constructor.parameters),
     },
     forward,
+    compatibilityReport: parseCompatibilityReport(value.compatibilityReport),
   }
+}
+
+function isCompatibilityStatus(value: unknown): value is CompatibilityStatus {
+  return value === 'supported' || value === 'configuration_required' || value === 'unsupported' || value === 'unknown'
+}
+
+function isDefaultKind(value: unknown): value is NonNullable<FunctionParameter['defaultKind']> {
+  return value === 'none' || value === 'bool' || value === 'int' || value === 'float' || value === 'str'
+    || value === 'list' || value === 'tuple' || value === 'dict' || value === 'expression'
+}
+
+function parseCompatibilityEvidence(value: unknown): CompatibilityEvidence[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error('Compatibility finding evidence must be a non-empty array.')
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.kind !== 'string' || typeof item.text !== 'string') throw new Error('Compatibility finding evidence is malformed.')
+    if (item.lineNumber !== undefined && (typeof item.lineNumber !== 'number' || !Number.isInteger(item.lineNumber) || item.lineNumber < 1)) throw new Error('Compatibility evidence has an invalid line number.')
+    return { kind: item.kind, text: item.text, lineNumber: typeof item.lineNumber === 'number' ? item.lineNumber : undefined }
+  })
+}
+
+export function parseCompatibilityReport(value: unknown): CompatibilityReport {
+  if (!isRecord(value)) throw new Error('Compatibility report must be an object.')
+  if (value.schemaVersion !== 1) throw new Error(`Unsupported compatibility report version: ${String(value.schemaVersion)}.`)
+  if (typeof value.className !== 'string' || !value.className) throw new Error('Compatibility report className is invalid.')
+  if (!Array.isArray(value.findings)) throw new Error('Compatibility report findings must be an array.')
+  const findings = value.findings.map((item): CompatibilityFinding => {
+    if (!isRecord(item)
+      || !isCompatibilityStatus(item.status)
+      || (item.category !== 'class' && item.category !== 'constructor' && item.category !== 'forward' && item.category !== 'input' && item.category !== 'import' && item.category !== 'resource' && item.category !== 'runtime' && item.category !== 'fx')
+      || (item.origin !== 'source' && item.origin !== 'heuristic' && item.origin !== 'runtime')
+      || typeof item.code !== 'string' || !item.code
+      || typeof item.title !== 'string' || !item.title
+      || typeof item.explanation !== 'string' || !item.explanation) throw new Error('Compatibility report contains a malformed finding.')
+    let target: CompatibilityTarget | undefined
+    if (item.target !== undefined) {
+      if (!isRecord(item.target)
+        || (item.target.kind !== 'constructor_parameter' && item.target.kind !== 'forward_parameter' && item.target.kind !== 'source')
+        || (item.target.kind !== 'source' && typeof item.target.name !== 'string')) throw new Error('Compatibility finding target is malformed.')
+      target = { kind: item.target.kind, name: typeof item.target.name === 'string' ? item.target.name : undefined }
+    }
+    return {
+      category: item.category,
+      code: item.code,
+      status: item.status,
+      title: item.title,
+      explanation: item.explanation,
+      origin: item.origin,
+      evidence: parseCompatibilityEvidence(item.evidence),
+      remediation: typeof item.remediation === 'string' ? item.remediation : undefined,
+      target,
+    }
+  })
+  if (!isRecord(value.tracingOutcome) || value.tracingOutcome.status !== 'unknown' || typeof value.tracingOutcome.statement !== 'string') throw new Error('Compatibility tracing outcome is malformed.')
+  return { schemaVersion: 1, className: value.className, findings, tracingOutcome: { status: 'unknown', statement: value.tracingOutcome.statement } }
 }
 
 function parseInputSuggestions(value: unknown): InputSuggestion[] {
@@ -206,16 +307,28 @@ export function parseInspectModelSourceResult(value: unknown): InspectModelSourc
       ? value.warnings.filter((warning): warning is SourceInspectionWarning => isRecord(warning) && typeof warning.code === 'string' && typeof warning.message === 'string')
       : []
 
-    return {
-      ok: true,
-      candidates: Array.isArray(value.candidates) ? value.candidates.filter(isCandidate).map(normalizeCandidate) : [],
-      warnings,
-      sourceIdentity: isRecord(value.sourceIdentity)
-        && typeof value.sourceIdentity.contentSha256 === 'string'
-        && typeof value.sourceIdentity.sizeBytes === 'number'
-        ? { contentSha256: value.sourceIdentity.contentSha256, sizeBytes: value.sourceIdentity.sizeBytes }
-        : undefined,
-      exampleInputProvider: value.exampleInputProvider === 'netviz_example_inputs' ? value.exampleInputProvider : null,
+    try {
+      return {
+        ok: true,
+        candidates: Array.isArray(value.candidates) ? value.candidates.filter(isCandidate).map(normalizeCandidate) : [],
+        warnings,
+        sourceIdentity: isRecord(value.sourceIdentity)
+          && typeof value.sourceIdentity.contentSha256 === 'string'
+          && typeof value.sourceIdentity.sizeBytes === 'number'
+          ? { contentSha256: value.sourceIdentity.contentSha256, sizeBytes: value.sourceIdentity.sizeBytes }
+          : undefined,
+        exampleInputProvider: value.exampleInputProvider === 'netviz_example_inputs' ? value.exampleInputProvider : null,
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: 'source_protocol_error',
+          title: 'Compatibility report is unsupported',
+          message: error instanceof Error ? error.message : 'The desktop bridge returned an invalid compatibility report.',
+          stage: 'source_inspection',
+        },
+      }
     }
   }
 

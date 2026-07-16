@@ -35,7 +35,7 @@ export function SourceInputStep({
   onClearPaste: () => void
 }) {
   return (
-    <section className="user-trace-section source-input-step">
+    <section className="user-trace-section source-input-step" id="model-source-step" tabIndex={-1}>
       <div className="user-trace-section-heading"><div><span>1</span><strong>Model source</strong></div></div>
       <div className="source-mode-selector" role="group" aria-label="Python model source">
         <button type="button" aria-pressed={mode === 'file'} onClick={() => onModeChange('file')} disabled={disabled}>Choose Python File</button>

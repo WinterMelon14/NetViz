@@ -5,6 +5,11 @@ SUPPORTED_TENSOR_DTYPES = frozenset({"float32", "int64"})
 SUPPORTED_TENSOR_GENERATORS = frozenset({"random_normal", "random_integer"})
 TENSOR_DTYPE_BYTES = {"float32": 4, "int64": 8}
 DEFAULT_INTEGER_MAX_EXCLUSIVE = 10
+TRACE_DEVICE_TYPE = "cpu"
+TRACE_MODEL_MODE = "eval"
+
+# Version of the nonexecuting source compatibility report returned by inspection.
+COMPATIBILITY_REPORT_VERSION = 1
 
 # Bounds representative tensor allocation before PyTorch is invoked.
 MAX_USER_INPUTS = 8

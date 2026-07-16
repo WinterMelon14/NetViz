@@ -15,6 +15,8 @@ import { TensorInputEditor } from './TensorInputEditor.tsx'
 import { MAX_TOTAL_INPUT_BYTES } from './constants.ts'
 import { applyErrorInputSuggestion as applyInputSuggestion, suggestFromTraceError } from './errorInputSuggestions.ts'
 import { SourceInputStep, type SourceMode } from './SourceInputStep.tsx'
+import { CompatibilityReportPanel } from './CompatibilityReportPanel.tsx'
+import { blockingCompatibilityFindings, compatibilityFindingKey, isCompatibilityFindingResolved } from './compatibilityState.ts'
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
 
@@ -80,6 +82,18 @@ export function UserTracePanel({
   const inputValidation = validateInputDrafts(inputDrafts, MAX_TOTAL_INPUT_BYTES)
   const errorInputSuggestion = traceFailure ? suggestFromTraceError(traceFailure, inputDrafts) : null
   const isTraceActive = traceState === 'starting' || traceState === 'running' || traceState === 'cancelling'
+  const compatibilityConfiguration = {
+    constructorFields,
+    inputDrafts,
+    constructorValid: constructorValidation.ok,
+    inputsValid: inputValidation.ok && !inputSignatureError,
+    useProviderInputs,
+  }
+  const compatibilityFindings = selectedCandidate?.compatibilityReport.findings ?? []
+  const compatibilityBlockers = blockingCompatibilityFindings(compatibilityFindings, compatibilityConfiguration)
+  const resolvedCompatibilityKeys = new Set(compatibilityFindings
+    .filter((finding) => isCompatibilityFindingResolved(finding, compatibilityConfiguration))
+    .map(compatibilityFindingKey))
 
   useEffect(() => {
     mountedRef.current = true
@@ -131,10 +145,6 @@ export function UserTracePanel({
       return
     }
     if (!result.source) return
-    if (source && !window.confirm('Discard the current model source and configuration?')) {
-      await releaseSourceHandle(result.source)
-      return
-    }
     if (!await releaseSourceHandle(source)) {
       await releaseSourceHandle(result.source)
       return
@@ -204,7 +214,6 @@ export function UserTracePanel({
 
   async function changeSourceMode(nextMode: SourceMode) {
     if (nextMode === sourceMode) return
-    if ((source || pastedText || inspection) && !window.confirm('Discard the current model source and configuration?')) return
     if (!await releaseSourceHandle(source)) return
     setSourceMode(nextMode)
     setSource(null)
@@ -225,7 +234,7 @@ export function UserTracePanel({
 
   function submitTrace() {
     const sourceIdentity = activeInspection?.sourceIdentity
-    if (!activeSource || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive) return
+    if (!activeSource || !selectedClass || !sourceIdentity || !trustedCodeConfirmed || compatibilityBlockers.length || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive) return
     const configuredInputs = inputValidation.ok ? inputValidation.inputs.map(({ draft, validation }) => ({
       kind: 'tensor' as const,
       parameter_name: draft.parameterName,
@@ -344,7 +353,7 @@ export function UserTracePanel({
               {selectedCandidate.constructor.parameters.map((parameter) => {
                 const field = constructorFields[parameter.name] ?? { enabled: true, text: '' }
                 return (
-                  <div className="constructor-field" key={parameter.name}>
+                  <div className="constructor-field" key={parameter.name} id={`constructor-parameter-${parameter.name}`} tabIndex={-1}>
                     <label>
                       <strong>{parameter.name}</strong>
                       <small>{parameter.typeText ?? parameter.annotationText ?? ''}</small>
@@ -375,8 +384,15 @@ export function UserTracePanel({
           {errorInputSuggestion ? <div className="input-recovery-suggestion"><span>{errorInputSuggestion.message}</span><button type="button" onClick={applyErrorInputSuggestion}>Apply Suggestion</button></div> : null}
         </section>
 
+        {selectedCandidate ? (
+          <CompatibilityReportPanel
+            report={selectedCandidate.compatibilityReport}
+            resolvedFindingKeys={resolvedCompatibilityKeys}
+          />
+        ) : null}
+
         <section className="user-trace-section trusted-code-confirmation">
-          <div className="user-trace-section-heading"><div><span>5</span><strong>Execute trusted code</strong></div></div>
+          <div className="user-trace-section-heading"><div><span>6</span><strong>Execute trusted code</strong></div></div>
           <p>Tracing imports and executes this local Python source with your user permissions. The worker isolates crashes and state, but it is not a security sandbox. Static inspection does not verify that code is safe.</p>
           <label>
             <input
@@ -407,8 +423,8 @@ export function UserTracePanel({
         ) : null}
 
         <footer>
-          <span className="toolbar-status">{traceState !== 'idle' ? traceState : 'ready'}</span>
-          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSource || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive}>Run Trace</button>
+          <span className="toolbar-status">{compatibilityBlockers.length ? `${compatibilityBlockers.length} compatibility blocker${compatibilityBlockers.length === 1 ? '' : 's'}` : traceState !== 'idle' ? traceState : 'ready'}</span>
+          <button type="button" className="primary-button" onClick={submitTrace} disabled={!activeSource || !selectedClass || !activeInspection?.sourceIdentity || !trustedCodeConfirmed || compatibilityBlockers.length > 0 || (!useProviderInputs && (Boolean(inputSignatureError) || !inputValidation.ok)) || !constructorValidation.ok || isTraceActive}>Run Trace</button>
         </footer>
           </>
         )}

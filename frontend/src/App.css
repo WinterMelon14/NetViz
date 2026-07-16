@@ -1289,9 +1289,134 @@ code {
   align-items: center;
 }
 
+.compatibility-report > .user-trace-section-heading small,
+.compatibility-outcome {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.compatibility-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.compatibility-count {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.compatibility-count strong {
+  color: var(--text-strong);
+  font-size: 17px;
+}
+
+.compatibility-count span {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.compatibility-status--supported { border-left-color: var(--accent); }
+.compatibility-status--configuration_required { border-left-color: #b36b00; }
+.compatibility-status--unsupported { border-left-color: var(--danger); }
+.compatibility-status--unknown { border-left-color: var(--text-muted); }
+
+.compatibility-sections,
+.compatibility-findings {
+  display: grid;
+  gap: 7px;
+}
+
+.compatibility-sections > details {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.compatibility-sections summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  color: var(--text-strong);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.compatibility-sections summary small {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.compatibility-findings {
+  padding: 0 9px 9px;
+}
+
+.compatibility-finding {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--hairline);
+  border-left-width: 4px;
+  border-radius: 5px;
+}
+
+.compatibility-finding.compatibility-status--supported { border-left-color: var(--accent); }
+.compatibility-finding.compatibility-status--configuration_required { border-left-color: #b36b00; }
+.compatibility-finding.compatibility-status--unsupported { border-left-color: var(--danger); }
+.compatibility-finding.compatibility-status--unknown { border-left-color: var(--text-muted); }
+
+.compatibility-finding header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.compatibility-finding header strong {
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.compatibility-finding header span,
+.compatibility-finding > small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.compatibility-finding p {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.compatibility-finding code {
+  padding: 6px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  background: var(--textarea);
+  font-size: 10px;
+}
+
+.compatibility-finding .compatibility-remediation {
+  color: var(--text-strong);
+}
+
 @media (max-width: 680px) {
   .constructor-field {
     grid-template-columns: 1fr;
+  }
+
+  .compatibility-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
