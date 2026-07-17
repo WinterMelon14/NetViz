@@ -18,13 +18,13 @@ from desktop.user_trace_constants import (
 )
 
 
-def build_compatibility_report(module: ast.Module, class_node: ast.ClassDef, candidate: dict[str, Any]) -> dict[str, Any]:
+def build_compatibility_report(module: ast.Module, class_node: ast.ClassDef, candidate: dict[str, Any], project_context: dict[str, Any] | None = None) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     findings.extend(_class_and_signature_findings(class_node, candidate))
     findings.extend(_input_findings(candidate))
-    findings.extend(_import_findings(module))
-    findings.extend(_resource_findings(module))
-    findings.extend(_runtime_findings())
+    findings.extend(_import_findings(module, project_context))
+    findings.extend(_resource_findings(module, project_context))
+    findings.extend(_runtime_findings(project_context))
     findings.extend(_fx_findings(class_node, candidate))
     report = {
         "schemaVersion": COMPATIBILITY_REPORT_VERSION,
@@ -116,9 +116,10 @@ def _input_findings(candidate: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def _import_findings(module: ast.Module) -> list[dict[str, Any]]:
+def _import_findings(module: ast.Module, project_context: dict[str, Any] | None) -> list[dict[str, Any]]:
     items = []
     standard = getattr(sys, "stdlib_module_names", frozenset())
+    local_paths = {item.get("path") for item in (project_context or {}).get("localModules", []) if isinstance(item, dict)}
     for node in ast.walk(module):
         if isinstance(node, ast.Import):
             imports = [(alias.name, 0) for alias in node.names]
@@ -129,9 +130,12 @@ def _import_findings(module: ast.Module) -> list[dict[str, Any]]:
         for name, level in imports:
             root = name.split(".")[0]
             if level:
-                code, status, title = "import_relative_local", "unsupported", "Relative local import"
-                explanation = "The current single-file worker does not establish package context for relative imports."
-                remediation = "Project-aware imports are planned for R2."
+                code, status, title = "import_relative_local", "supported" if local_paths else "configuration_required", "Relative local import"
+                explanation = "The worker will execute with an explicit project root so package-relative imports can resolve."
+                remediation = None if local_paths else "Choose a project root that contains this package before tracing."
+            elif any(path == f"{root}.py" or path.startswith(f"{root}/") for path in local_paths):
+                code, status, title = "import_local_project", "supported", "Local project import"
+                explanation, remediation = f"{name} resolves inside the selected project root.", None
             elif root in standard:
                 code, status, title = "import_standard_library", "supported", "Standard-library import"
                 explanation, remediation = f"{name} is available from the Python standard library.", None
@@ -145,9 +149,10 @@ def _import_findings(module: ast.Module) -> list[dict[str, Any]]:
     return _dedupe(items)
 
 
-def _resource_findings(module: ast.Module) -> list[dict[str, Any]]:
+def _resource_findings(module: ast.Module, project_context: dict[str, Any] | None) -> list[dict[str, Any]]:
     items = []
     resource_calls = {"open", "torch.load", "load", "from_pretrained", "Path"}
+    resources = {item.get("path"): item for item in (project_context or {}).get("resources", []) if isinstance(item, dict)}
     for node in ast.walk(module):
         if not isinstance(node, ast.Call) or not node.args or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
             continue
@@ -155,11 +160,17 @@ def _resource_findings(module: ast.Module) -> list[dict[str, Any]]:
         if call_name.split(".")[-1] not in resource_calls:
             continue
         path = node.args[0].value
-        items.append(finding("resource", "resource_reference_likely", "unknown", "Likely external resource", f"The call {call_name} references {path!r}; static inspection cannot confirm when or how it is used.", "heuristic", source_evidence(ast.unparse(node), node.lineno), "Confirm that the resource is available from the worker's current directory."))
+        resource = resources.get(path.replace("\\", "/"))
+        if resource and resource.get("exists") is True:
+            items.append(finding("resource", "resource_declared", "supported", "Declared project resource", f"The call {call_name} references {path!r}, which exists under the selected project root.", "source", source_evidence(ast.unparse(node), node.lineno)))
+        elif resource:
+            items.append(finding("resource", "resource_missing", "configuration_required", "Missing project resource", f"The call {call_name} references {path!r}, but that file was not found under the selected project root.", "source", source_evidence(ast.unparse(node), node.lineno), "Add the resource or choose the correct project root before tracing."))
+        else:
+            items.append(finding("resource", "resource_reference_likely", "unknown", "Likely external resource", f"The call {call_name} references {path!r}; static inspection cannot confirm when or how it is used.", "heuristic", source_evidence(ast.unparse(node), node.lineno), "Confirm that the resource is available from the worker's current directory."))
     return _dedupe(items)
 
 
-def _runtime_findings() -> list[dict[str, Any]]:
+def _runtime_findings(project_context: dict[str, Any] | None) -> list[dict[str, Any]]:
     constraints = [
         ("runtime_device_cpu", "CPU execution", f"Generated representative tensors use {TRACE_DEVICE_TYPE}."),
         ("runtime_mode_eval", "Evaluation mode", f"The traced graph runs in {TRACE_MODEL_MODE} mode."),
@@ -167,6 +178,11 @@ def _runtime_findings() -> list[dict[str, Any]]:
         ("runtime_input_limits", "Input allocation limits", f"At most {MAX_USER_INPUTS} tensors, {MAX_TENSOR_DIMENSIONS} dimensions, {MAX_TENSOR_ELEMENTS:,} elements per tensor, and {MAX_TOTAL_INPUT_BYTES:,} total bytes."),
         ("runtime_timeout", "Trace timeout", f"The worker timeout is {DEFAULT_TRACE_TIMEOUT_SECONDS} seconds."),
     ]
+    if project_context:
+        constraints.extend([
+            ("runtime_project_root", "Project root", f"Imports resolve from {project_context['projectRootDisplay']}."),
+            ("runtime_working_directory", "Working directory", f"The worker current directory is {project_context['workingDirectoryDisplay']}."),
+        ])
     return [finding("runtime", code, "supported", title, explanation, "runtime", [{"kind": "runtime", "text": explanation}]) for code, title, explanation in constraints]
 
 

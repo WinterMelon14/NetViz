@@ -1442,6 +1442,43 @@ code {
   color: var(--text-strong);
 }
 
+.project-scope-summary dl,
+.project-scope-lists {
+  display: grid;
+  gap: 8px;
+}
+
+.project-scope-summary dl {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin: 0;
+}
+
+.project-scope-summary dl div,
+.project-scope-lists > div {
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.project-scope-summary dt,
+.project-scope-lists strong {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.project-scope-summary dd {
+  margin: 2px 0 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.project-scope-lists ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-strong);
+}
+
 @media (max-width: 680px) {
   .constructor-field {
     grid-template-columns: 1fr;

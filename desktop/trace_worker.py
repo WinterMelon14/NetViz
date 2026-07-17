@@ -11,7 +11,7 @@ from desktop.user_model_runtime import (
     build_tensor_inputs,
     build_provider_inputs,
     instantiate_model,
-    load_sanitized_user_module,
+    load_project_user_module,
 )
 from desktop.user_trace_request import UserTraceRequestError, validate_user_trace_request
 from desktop.trace_protocol import (
@@ -104,11 +104,12 @@ def run_trace(request_path: str | None = None):
         )
 
     try:
-        with load_sanitized_user_module(
+        with load_project_user_module(
             request["source"]["file_path"],
             run_id,
             request["source"]["content_sha256"],
             Path(request_path).parent,
+            request["project_context"],
         ) as module:
             model = instantiate_model(
                 module,

@@ -5,17 +5,13 @@ import { formatBytes } from './inputConfig.ts'
 export function TraceErrorCard({
   failure,
   canInspectAgain,
-  onRetry,
   onInspectAgain,
   onChooseFile,
-  onClose,
 }: {
   failure: TraceFailure
   canInspectAgain: boolean
-  onRetry: () => void
   onInspectAgain: () => void
   onChooseFile: () => void
-  onClose: () => void
 }) {
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
   const isSourceFailure = failure.error.code === 'source_changed' || failure.error.code === 'source_reinspection_required'
@@ -44,8 +40,6 @@ export function TraceErrorCard({
       <div className="trace-error-actions">
         {isSourceFailure && canInspectAgain ? <button type="button" onClick={onInspectAgain}>Inspect Again</button> : null}
         {isSelectionFailure ? <button type="button" onClick={onChooseFile}>Choose Source Again</button> : null}
-        {!isSourceFailure && !isSelectionFailure ? <button type="button" onClick={onRetry}>Try Again</button> : null}
-        <button type="button" onClick={onClose}>Close</button>
       </div>
       {suppliedInputs.length ? (
         <div className="trace-error-inputs">

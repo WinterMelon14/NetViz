@@ -1,5 +1,7 @@
 import ast
+import hashlib
 from typing import Any, Literal
+from pathlib import Path
 from desktop.compatibility_analysis import build_compatibility_report
 from desktop.input_suggestions import inspect_input_suggestions
 from desktop.user_trace_constants import MAX_SOURCE_CHARS
@@ -52,7 +54,7 @@ def inspect_model_source_request(request: Any) -> dict[str, Any]:
     return inspect_model_source(source_text)
 
 
-def inspect_model_source(source_text: str) -> dict[str, Any]:
+def inspect_model_source(source_text: str, source_path: Path | None = None, project_root: Path | None = None) -> dict[str, Any]:
     if not source_text.strip():
         return inspection_error(
             "source_empty",
@@ -87,12 +89,13 @@ def inspect_model_source(source_text: str) -> dict[str, Any]:
 
     try:
         aliases = inspect_import_aliases(module)
+        project_context = inspect_project_context(module, source_path, project_root)
         candidates: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
         for class_node, is_nested in iter_class_definitions(module):
             candidate = inspect_class(class_node, aliases)
             if candidate:
-                candidate["compatibilityReport"] = build_compatibility_report(module, class_node, candidate)
+                candidate["compatibilityReport"] = build_compatibility_report(module, class_node, candidate, project_context)
                 candidates.append(candidate)
                 if is_nested:
                     warnings.append({
@@ -109,7 +112,10 @@ def inspect_model_source(source_text: str) -> dict[str, Any]:
                     })
 
         provider = next((node.name for node in module.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "netviz_example_inputs"), None)
-        return {"ok": True, "candidates": candidates, "warnings": warnings, "exampleInputProvider": provider}
+        result = {"ok": True, "candidates": candidates, "warnings": warnings, "exampleInputProvider": provider}
+        if project_context:
+            result["projectContext"] = project_context
+        return result
     except Exception as exc:
         return inspection_error(
             "source_inspection_failed",
@@ -148,6 +154,102 @@ def inspect_import_aliases(module: ast.Module) -> dict[str, set[str]]:
                         aliases["torch_layers"][alias.asname or alias.name] = alias.name
 
     return aliases
+
+
+def inspect_project_context(module: ast.Module, source_path: Path | None, project_root: Path | None) -> dict[str, Any] | None:
+    if source_path is None or project_root is None:
+        return None
+    try:
+        source_path = source_path.resolve()
+        project_root = project_root.resolve()
+        entry_relative = source_path.relative_to(project_root).as_posix()
+    except (OSError, ValueError):
+        return None
+
+    local_modules = []
+    for path in sorted(resolve_local_imports(module, source_path, project_root)):
+        local_modules.append(project_file_descriptor(path, project_root))
+
+    resources = []
+    for path in sorted(resolve_resource_paths(module, project_root)):
+        resources.append(project_file_descriptor(path, project_root))
+
+    return {
+        "projectRootDisplay": project_root.name or str(project_root),
+        "entryRelativePath": entry_relative,
+        "workingDirectoryDisplay": project_root.name or str(project_root),
+        "localModules": local_modules,
+        "resources": resources,
+    }
+
+
+def project_file_descriptor(path: Path, project_root: Path) -> dict[str, Any]:
+    descriptor = {"path": path.relative_to(project_root).as_posix()}
+    try:
+        content = path.read_bytes()
+        descriptor["contentSha256"] = hashlib.sha256(content).hexdigest()
+        descriptor["sizeBytes"] = len(content)
+        descriptor["exists"] = True
+    except OSError:
+        descriptor["exists"] = False
+    return descriptor
+
+
+def resolve_local_imports(module: ast.Module, source_path: Path, project_root: Path) -> set[Path]:
+    paths: set[Path] = set()
+    package_parts = source_path.relative_to(project_root).with_suffix("").parts[:-1]
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                resolved = resolve_absolute_module(alias.name, project_root)
+                if resolved:
+                    paths.add(resolved)
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if node.level:
+                base = package_parts[: max(0, len(package_parts) - node.level + 1)]
+                full_name = ".".join([*base, *([module_name] if module_name else [])])
+                resolved = resolve_absolute_module(full_name, project_root) if full_name else None
+            else:
+                resolved = resolve_absolute_module(module_name, project_root)
+            if resolved:
+                paths.add(resolved)
+    paths.discard(source_path)
+    return paths
+
+
+def resolve_absolute_module(module_name: str, project_root: Path) -> Path | None:
+    if not module_name:
+        return None
+    relative = Path(*module_name.split("."))
+    module_file = project_root / relative.with_suffix(".py")
+    if module_file.is_file():
+        return module_file.resolve()
+    package_init = project_root / relative / "__init__.py"
+    if package_init.is_file():
+        return package_init.resolve()
+    return None
+
+
+def resolve_resource_paths(module: ast.Module, project_root: Path) -> set[Path]:
+    paths: set[Path] = set()
+    resource_calls = {"open", "torch.load", "load", "from_pretrained", "Path"}
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Call) or not node.args or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+            continue
+        call_name = ast.unparse(node.func)
+        if call_name.split(".")[-1] not in resource_calls:
+            continue
+        raw_path = Path(node.args[0].value)
+        if raw_path.is_absolute():
+            continue
+        resolved = (project_root / raw_path).resolve()
+        try:
+            resolved.relative_to(project_root)
+        except ValueError:
+            continue
+        paths.add(resolved)
+    return paths
 
 
 def iter_class_definitions(module: ast.Module) -> list[tuple[ast.ClassDef, bool]]:

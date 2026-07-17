@@ -14,6 +14,32 @@ from desktop.user_trace_constants import MAX_SOURCE_CHARS, MAX_SOURCE_DISPLAY_NA
 PythonFilePicker = Callable[[], str | None]
 
 
+def _relative_project_path(path: Path, project_root: Path) -> str:
+    try:
+        return path.resolve().relative_to(project_root.resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _frontend_project_files(project_context: Any, field: str) -> list[dict[str, Any]]:
+    if not isinstance(project_context, dict) or not isinstance(project_context.get(field), list):
+        return []
+    items = []
+    for item in project_context[field]:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        descriptor = {
+            "path": item["path"],
+            "exists": item.get("exists") is True,
+        }
+        if isinstance(item.get("contentSha256"), str):
+            descriptor["content_sha256"] = item["contentSha256"]
+        if isinstance(item.get("sizeBytes"), int):
+            descriptor["size_bytes"] = item["sizeBytes"]
+        items.append(descriptor)
+    return items
+
+
 @dataclass(frozen=True)
 class SourceHandle:
     id: str
@@ -22,6 +48,7 @@ class SourceHandle:
     size_bytes: int
     source_path: Path
     content_sha256: str | None = None
+    project_root: Path | None = None
 
 
 def native_python_file_picker() -> str | None:
@@ -67,7 +94,7 @@ class SourceHandles:
         except ValueError as exc:
             return self._error("selected_file_invalid", "Selected file is not supported", str(exc), "file_selection")
 
-        handle = SourceHandle(uuid4().hex, "file", path.name, path.stat().st_size, path)
+        handle = SourceHandle(uuid4().hex, "file", path.name, path.stat().st_size, path, project_root=path.parent)
         with self._lock:
             self._handles[handle.id] = handle
         return {"ok": True, "selected": self._descriptor(handle)}
@@ -113,6 +140,7 @@ class SourceHandles:
             len(source_bytes),
             path,
             hashlib.sha256(source_bytes).hexdigest(),
+            path.parent,
         )
         with self._lock:
             previous_inline_ids = [source_id for source_id, item in self._handles.items() if item.kind == "inline"]
@@ -136,20 +164,20 @@ class SourceHandles:
         except (OSError, UnicodeError, ValueError) as exc:
             return inspection_error("source_inspection_failed", "Source could not be read", str(exc))
 
-        result = inspect_model_source(source_text)
+        result = inspect_model_source(source_text, handle.source_path, handle.project_root)
         if result.get("ok") is not True:
             with self._lock:
                 self._inspected.pop(source_id, None)
                 current = self._handles.get(source_id)
                 if current:
                     self._handles[source_id] = SourceHandle(
-                        current.id, current.kind, current.display_name, current.size_bytes, current.source_path, None
+                        current.id, current.kind, current.display_name, current.size_bytes, current.source_path, None, current.project_root
                     )
             return result
 
         identity = hashlib.sha256(source_bytes).hexdigest()
         inspected_handle = SourceHandle(
-            handle.id, handle.kind, handle.display_name, len(source_bytes), handle.source_path, identity
+            handle.id, handle.kind, handle.display_name, len(source_bytes), handle.source_path, identity, handle.project_root
         )
         with self._lock:
             self._handles[handle.id] = inspected_handle
@@ -191,6 +219,17 @@ class SourceHandles:
             "class_name": source.get("class_name"),
             "content_sha256": inspected_sha256,
         }
+        project_context = request.get("project_context")
+        if handle.project_root is not None:
+            local_modules = _frontend_project_files(project_context, "localModules")
+            resources = _frontend_project_files(project_context, "resources")
+            resolved["project_context"] = {
+                "project_root": str(handle.project_root),
+                "working_directory": str(handle.project_root),
+                "entry_relative_path": _relative_project_path(handle.source_path, handle.project_root),
+                "local_modules": local_modules,
+                "resources": resources,
+            }
         return resolved
 
     def release(self, source_id: Any) -> dict[str, Any]:
@@ -220,7 +259,7 @@ class SourceHandles:
             raise ValueError("The source handle is missing, invalid, or expired.")
         if handle.kind == "file":
             path = self._validate_file_path(handle.source_path)
-            return SourceHandle(handle.id, handle.kind, handle.display_name, path.stat().st_size, path, handle.content_sha256)
+            return SourceHandle(handle.id, handle.kind, handle.display_name, path.stat().st_size, path, handle.content_sha256, handle.project_root or path.parent)
         try:
             file_stat = handle.source_path.stat()
         except OSError as exc:
@@ -256,7 +295,10 @@ class SourceHandles:
 
     @staticmethod
     def _descriptor(handle: SourceHandle) -> dict[str, Any]:
-        return {"sourceId": handle.id, "kind": handle.kind, "displayName": handle.display_name, "sizeBytes": handle.size_bytes}
+        descriptor = {"sourceId": handle.id, "kind": handle.kind, "displayName": handle.display_name, "sizeBytes": handle.size_bytes}
+        if handle.project_root is not None:
+            descriptor["projectRootDisplay"] = handle.project_root.name or str(handle.project_root)
+        return descriptor
 
     @staticmethod
     def _error(code: str, title: str, message: str, stage: str) -> dict[str, Any]:

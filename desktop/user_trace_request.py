@@ -112,7 +112,7 @@ def validate_user_trace_request(
     if input_schema_version not in {1, 2}:
         raise UserTraceRequestError("input_schema_version", "must equal 1 or 2")
     input_fields = {"inputs"} if input_schema_version == 1 else {"args", "kwargs"}
-    _exact_fields(request, {"protocol_version", "input_schema_version", "run_id", "source", "constructor", "input_provider", "output_path"} | input_fields, "request")
+    _exact_fields(request, {"protocol_version", "input_schema_version", "run_id", "source", "constructor", "input_provider", "output_path", "project_context"} | input_fields, "request")
 
     if request.get("protocol_version") != PROTOCOL_VERSION:
         raise UserTraceRequestError("protocol_version", f"must equal {PROTOCOL_VERSION}")
@@ -136,6 +136,7 @@ def validate_user_trace_request(
         raise UserTraceRequestError("source.file_path", "must reference an existing regular file") from exc
     if not stat.S_ISREG(file_stat.st_mode):
         raise UserTraceRequestError("source.file_path", "must reference an existing regular file")
+    project_context = _validate_project_context(request.get("project_context"), file_path)
 
     constructor = _validate_constructor(request.get("constructor"))
 
@@ -241,6 +242,7 @@ def validate_user_trace_request(
         "input_schema_version": input_schema_version,
         "run_id": run_id,
         "source": {"file_path": str(file_path), "class_name": class_name, "content_sha256": content_sha256},
+        "project_context": project_context,
         "constructor": constructor,
         "inputs": normalized_inputs,
         "args": normalized_args,
@@ -248,3 +250,74 @@ def validate_user_trace_request(
         "input_provider": normalized_provider,
         "output_path": str(output_path),
     }
+
+
+def _validate_project_context(value: Any, source_path: Path) -> dict[str, Any]:
+    if value is None:
+        root = source_path.parent.resolve()
+        return {
+            "project_root": str(root),
+            "working_directory": str(root),
+            "entry_relative_path": source_path.name,
+            "local_modules": [],
+            "resources": [],
+        }
+    context = _object(value, "project_context")
+    _exact_fields(context, {"project_root", "working_directory", "entry_relative_path", "local_modules", "resources"}, "project_context")
+    project_root = Path(_non_empty_string(context.get("project_root"), "project_context.project_root")).resolve()
+    working_directory = Path(_non_empty_string(context.get("working_directory"), "project_context.working_directory")).resolve()
+    try:
+        root_stat = project_root.stat()
+        working_directory.relative_to(project_root)
+        source_path.resolve().relative_to(project_root)
+    except (OSError, ValueError) as exc:
+        raise UserTraceRequestError("project_context.project_root", "must contain the source file and working directory") from exc
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise UserTraceRequestError("project_context.project_root", "must reference an existing directory")
+    if not working_directory.is_dir():
+        raise UserTraceRequestError("project_context.working_directory", "must reference an existing directory")
+    entry_relative_path = _non_empty_string(context.get("entry_relative_path"), "project_context.entry_relative_path")
+    if (project_root / entry_relative_path).resolve() != source_path.resolve():
+        raise UserTraceRequestError("project_context.entry_relative_path", "must match source.file_path")
+
+    return {
+        "project_root": str(project_root),
+        "working_directory": str(working_directory),
+        "entry_relative_path": entry_relative_path,
+        "local_modules": _validate_project_files(context.get("local_modules"), project_root, "project_context.local_modules"),
+        "resources": _validate_project_files(context.get("resources"), project_root, "project_context.resources"),
+    }
+
+
+def _validate_project_files(value: Any, project_root: Path, path: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise UserTraceRequestError(path, "must be an array")
+    normalized = []
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        descriptor = _object(item, item_path)
+        _exact_fields(descriptor, {"path", "content_sha256", "size_bytes", "exists"}, item_path)
+        relative = _non_empty_string(descriptor.get("path"), f"{item_path}.path")
+        resolved = (project_root / relative).resolve()
+        try:
+            resolved.relative_to(project_root)
+        except ValueError as exc:
+            raise UserTraceRequestError(f"{item_path}.path", "must stay inside project_root") from exc
+        exists = descriptor.get("exists")
+        if not isinstance(exists, bool):
+            raise UserTraceRequestError(f"{item_path}.exists", "must be a boolean")
+        digest = descriptor.get("content_sha256")
+        if exists:
+            if not resolved.is_file():
+                raise UserTraceRequestError(f"{item_path}.path", "must reference an existing file")
+            if not isinstance(digest, str) or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+                raise UserTraceRequestError(f"{item_path}.content_sha256", "must be a lowercase SHA-256 digest")
+            size_bytes = descriptor.get("size_bytes")
+            if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
+                raise UserTraceRequestError(f"{item_path}.size_bytes", "must be a non-negative integer")
+            normalized.append({"path": relative, "content_sha256": digest, "size_bytes": size_bytes, "exists": True})
+        else:
+            normalized.append({"path": relative, "exists": False})
+    return normalized

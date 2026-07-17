@@ -102,11 +102,27 @@ export type SourceInspectionError = {
   traceback?: string | null
 }
 
+export type ProjectFileIdentity = {
+  path: string
+  exists: boolean
+  contentSha256?: string
+  sizeBytes?: number
+}
+
+export type ProjectContext = {
+  projectRootDisplay: string
+  entryRelativePath: string
+  workingDirectoryDisplay: string
+  localModules: ProjectFileIdentity[]
+  resources: ProjectFileIdentity[]
+}
+
 export type InspectModelSourceSuccess = {
   ok: true
   candidates: ModelCandidate[]
   warnings: SourceInspectionWarning[]
   sourceIdentity?: { contentSha256: string; sizeBytes: number }
+  projectContext?: ProjectContext
   exampleInputProvider?: 'netviz_example_inputs' | null
 }
 
@@ -289,6 +305,33 @@ function parseInputSuggestions(value: unknown): InputSuggestion[] {
   })
 }
 
+function parseProjectFiles(value: unknown): ProjectFileIdentity[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.path !== 'string' || typeof item.exists !== 'boolean') return []
+    return [{
+      path: item.path,
+      exists: item.exists,
+      contentSha256: typeof item.contentSha256 === 'string' ? item.contentSha256 : undefined,
+      sizeBytes: typeof item.sizeBytes === 'number' ? item.sizeBytes : undefined,
+    }]
+  })
+}
+
+function parseProjectContext(value: unknown): ProjectContext | undefined {
+  if (!isRecord(value)
+    || typeof value.projectRootDisplay !== 'string'
+    || typeof value.entryRelativePath !== 'string'
+    || typeof value.workingDirectoryDisplay !== 'string') return undefined
+  return {
+    projectRootDisplay: value.projectRootDisplay,
+    entryRelativePath: value.entryRelativePath,
+    workingDirectoryDisplay: value.workingDirectoryDisplay,
+    localModules: parseProjectFiles(value.localModules),
+    resources: parseProjectFiles(value.resources),
+  }
+}
+
 export function parseInspectModelSourceResult(value: unknown): InspectModelSourceResult {
   if (!isRecord(value)) {
     return {
@@ -317,6 +360,7 @@ export function parseInspectModelSourceResult(value: unknown): InspectModelSourc
           && typeof value.sourceIdentity.sizeBytes === 'number'
           ? { contentSha256: value.sourceIdentity.contentSha256, sizeBytes: value.sourceIdentity.sizeBytes }
           : undefined,
+        projectContext: parseProjectContext(value.projectContext),
         exampleInputProvider: value.exampleInputProvider === 'netviz_example_inputs' ? value.exampleInputProvider : null,
       }
     } catch (error) {

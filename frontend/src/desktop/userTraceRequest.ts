@@ -1,4 +1,5 @@
 import type { SerializableLiteral } from './sourceInspectionApi.ts'
+import type { ProjectContext } from './sourceInspectionApi.ts'
 import {
   FLOAT32_BYTES,
   INT64_BYTES,
@@ -32,6 +33,7 @@ type TraceRequestBase = {
     class_name: string
     content_sha256: string
   }
+  project_context?: ProjectContext
   constructor: {
     args: SerializableLiteral[]
     kwargs: Record<string, SerializableLiteral>
@@ -59,6 +61,13 @@ export type UserTraceWorkerRequest = {
     file_path: string
     class_name: string
     content_sha256: string
+  }
+  project_context?: {
+    project_root: string
+    working_directory: string
+    entry_relative_path: string
+    local_modules: Array<{ path: string; content_sha256?: string; size_bytes?: number; exists: boolean }>
+    resources: Array<{ path: string; content_sha256?: string; size_bytes?: number; exists: boolean }>
   }
   constructor: TraceRequestBase['constructor']
   input_provider: TraceRequestBase['input_provider']

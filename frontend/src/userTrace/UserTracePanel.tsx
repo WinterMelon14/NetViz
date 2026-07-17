@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { TraceRunState } from '../desktop/desktopTraceApi.ts'
 import { inspectPythonSource, registerInlinePythonSource, releasePythonSource, selectPythonFile } from '../desktop/sourceApi.ts'
 import type { PythonSource } from '../desktop/sourceApi.ts'
-import type { InspectModelSourceSuccess, ModelCandidate, SourceInspectionError } from '../desktop/sourceInspectionApi.ts'
+import type { InspectModelSourceSuccess, ModelCandidate, ProjectContext, SourceInspectionError } from '../desktop/sourceInspectionApi.ts'
 import type { UserTraceBridgeRequest } from '../desktop/userTraceRequest.ts'
 import { buildConstructorConfig, initialConstructorFields, type ConstructorFieldState } from './constructorConfig.ts'
 import { TRUSTED_SOURCE_STORAGE_PREFIX } from './constants.ts'
@@ -255,6 +255,7 @@ export function UserTracePanel({
         class_name: selectedClass,
         content_sha256: sourceIdentity.contentSha256,
       },
+      project_context: activeInspection.projectContext,
       constructor: { args: constructorValidation.args, kwargs: constructorValidation.kwargs },
       input_schema_version: 2,
       args: useProviderInputs || !inputValidation.ok ? [] : inputValidation.args,
@@ -401,8 +402,10 @@ export function UserTracePanel({
           />
         ) : null}
 
+        {activeInspection?.projectContext ? <ProjectScopeSummary projectContext={activeInspection.projectContext} /> : null}
+
         <section className="user-trace-section trusted-code-confirmation">
-          <div className="user-trace-section-heading"><div><span>6</span><strong>Execute trusted code</strong></div></div>
+          <div className="user-trace-section-heading"><div><span>{activeInspection?.projectContext ? 7 : 6}</span><strong>Execute trusted code</strong></div></div>
           <p>Tracing imports and executes this local Python source with your user permissions. The worker isolates crashes and state, but it is not a security sandbox. Static inspection does not verify that code is safe.</p>
           <label>
             <input
@@ -422,13 +425,11 @@ export function UserTracePanel({
           <TraceErrorCard
             failure={traceFailure}
             canInspectAgain={Boolean(source || (sourceMode === 'paste' && pastedText))}
-            onRetry={submitTrace}
             onInspectAgain={() => {
               if (source) void inspectSource(source)
               else if (sourceMode === 'paste') void inspectPaste()
             }}
             onChooseFile={() => sourceMode === 'file' ? void chooseFile() : void inspectPaste()}
-            onClose={onClose}
           />
         ) : null}
 
@@ -440,5 +441,34 @@ export function UserTracePanel({
         )}
       </section>
     </div>
+  )
+}
+
+function ProjectScopeSummary({ projectContext }: { projectContext: ProjectContext }) {
+  const missingResources = projectContext.resources.filter((resource) => !resource.exists)
+  return (
+    <section className="user-trace-section project-scope-summary">
+      <div className="user-trace-section-heading"><div><span>6</span><strong>Project scope</strong></div></div>
+      <dl>
+        <div><dt>Import root</dt><dd>{projectContext.projectRootDisplay}</dd></div>
+        <div><dt>Entry file</dt><dd>{projectContext.entryRelativePath}</dd></div>
+        <div><dt>Working directory</dt><dd>{projectContext.workingDirectoryDisplay}</dd></div>
+      </dl>
+      <div className="project-scope-lists">
+        <div>
+          <strong>Local modules</strong>
+          {projectContext.localModules.length ? (
+            <ul>{projectContext.localModules.map((module) => <li key={module.path}>{module.path}</li>)}</ul>
+          ) : <p className="source-muted">No local module imports were discovered statically.</p>}
+        </div>
+        <div>
+          <strong>Declared resources</strong>
+          {projectContext.resources.length ? (
+            <ul>{projectContext.resources.map((resource) => <li key={resource.path}>{resource.path}{resource.exists ? '' : ' (missing)'}</li>)}</ul>
+          ) : <p className="source-muted">No checkpoint or config resources were discovered statically.</p>}
+        </div>
+      </div>
+      {missingResources.length ? <p className="source-error">Missing declared resources block execution until the project is inspected again with those files present.</p> : null}
+    </section>
   )
 }
