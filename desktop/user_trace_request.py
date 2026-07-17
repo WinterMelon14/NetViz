@@ -15,6 +15,11 @@ from desktop.user_trace_constants import (
     MAX_TENSOR_DIMENSIONS,
     MAX_TENSOR_ELEMENTS,
     MAX_TOTAL_INPUT_BYTES,
+    DEFAULT_PROFILE_MEASUREMENT_RUNS,
+    DEFAULT_PROFILE_WARMUP_RUNS,
+    MAX_PROFILE_MEASUREMENT_RUNS,
+    MAX_PROFILE_WARMUP_RUNS,
+    PROFILE_PERCENTILES,
     MAX_USER_INPUTS,
     SUPPORTED_TENSOR_DTYPES,
     SUPPORTED_TENSOR_GENERATORS,
@@ -102,6 +107,35 @@ def _validate_constructor(value: Any) -> dict[str, Any]:
     return normalized
 
 
+def _validate_profile(value: Any, trace_mode: str) -> dict[str, Any] | None:
+    if trace_mode == "trace":
+        if value is not None:
+            raise UserTraceRequestError("profile", "is only supported when trace_mode is 'profile'")
+        return None
+    profile = {} if value is None else _object(value, "profile")
+    _exact_fields(profile, {"warmup_runs", "measurement_runs", "percentiles"}, "profile")
+    warmup_runs = profile.get("warmup_runs", DEFAULT_PROFILE_WARMUP_RUNS)
+    measurement_runs = profile.get("measurement_runs", DEFAULT_PROFILE_MEASUREMENT_RUNS)
+    if isinstance(warmup_runs, bool) or not isinstance(warmup_runs, int) or warmup_runs < 0 or warmup_runs > MAX_PROFILE_WARMUP_RUNS:
+        raise UserTraceRequestError("profile.warmup_runs", f"must be an integer from 0 to {MAX_PROFILE_WARMUP_RUNS}")
+    if isinstance(measurement_runs, bool) or not isinstance(measurement_runs, int) or measurement_runs < 1 or measurement_runs > MAX_PROFILE_MEASUREMENT_RUNS:
+        raise UserTraceRequestError("profile.measurement_runs", f"must be an integer from 1 to {MAX_PROFILE_MEASUREMENT_RUNS}")
+    percentiles = profile.get("percentiles", list(PROFILE_PERCENTILES))
+    if not isinstance(percentiles, list) or not percentiles:
+        raise UserTraceRequestError("profile.percentiles", "must be a non-empty array")
+    normalized_percentiles = []
+    for index, percentile in enumerate(percentiles):
+        if isinstance(percentile, bool) or not isinstance(percentile, int) or percentile < 1 or percentile > 99:
+            raise UserTraceRequestError(f"profile.percentiles[{index}]", "must be an integer from 1 to 99")
+        if percentile not in normalized_percentiles:
+            normalized_percentiles.append(percentile)
+    return {
+        "warmup_runs": warmup_runs,
+        "measurement_runs": measurement_runs,
+        "percentiles": normalized_percentiles,
+    }
+
+
 def validate_user_trace_request(
     value: Any,
     *,
@@ -112,11 +146,15 @@ def validate_user_trace_request(
     if input_schema_version not in {1, 2}:
         raise UserTraceRequestError("input_schema_version", "must equal 1 or 2")
     input_fields = {"inputs"} if input_schema_version == 1 else {"args", "kwargs"}
-    _exact_fields(request, {"protocol_version", "input_schema_version", "run_id", "source", "constructor", "input_provider", "output_path", "project_context"} | input_fields, "request")
+    _exact_fields(request, {"protocol_version", "input_schema_version", "run_id", "source", "constructor", "input_provider", "output_path", "project_context", "trace_mode", "profile"} | input_fields, "request")
 
     if request.get("protocol_version") != PROTOCOL_VERSION:
         raise UserTraceRequestError("protocol_version", f"must equal {PROTOCOL_VERSION}")
     run_id = _non_empty_string(request.get("run_id"), "run_id")
+    trace_mode = request.get("trace_mode", "trace")
+    if trace_mode not in {"trace", "profile"}:
+        raise UserTraceRequestError("trace_mode", "must equal 'trace' or 'profile'")
+    profile = _validate_profile(request.get("profile"), trace_mode)
 
     source = _object(request.get("source"), "source")
     _exact_fields(source, {"file_path", "class_name", "content_sha256"}, "source")
@@ -241,6 +279,8 @@ def validate_user_trace_request(
         "protocol_version": PROTOCOL_VERSION,
         "input_schema_version": input_schema_version,
         "run_id": run_id,
+        "trace_mode": trace_mode,
+        "profile": profile,
         "source": {"file_path": str(file_path), "class_name": class_name, "content_sha256": content_sha256},
         "project_context": project_context,
         "constructor": constructor,

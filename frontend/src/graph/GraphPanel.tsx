@@ -41,6 +41,10 @@ export function GraphPanel({
   onNodePointerUp: (event: PointerEvent<HTMLButtonElement>) => void
   onSelectNode: (nodeId: string) => void
 }) {
+  const timingValues = nodes.flatMap((node) => typeof node.profile?.median_ms === 'number' ? [node.profile.median_ms] : [])
+  const timingMedian = median(timingValues)
+  const timingStdDev = standardDeviation(timingValues)
+
   return (
     <section className="graph-panel" aria-label={`${modelName} graph`}>
       <div
@@ -65,6 +69,7 @@ export function GraphPanel({
               <GraphNodeCard
                 key={node.id}
                 node={node}
+                timingSeverity={timingSeverity(node.profile?.median_ms, timingMedian, timingStdDev)}
                 isOutputNode={outputNodeIds.has(node.id)}
                 isSelected={node.id === selectedNodeId}
                 onPointerDown={onNodePointerDown}
@@ -78,4 +83,25 @@ export function GraphPanel({
       </div>
     </section>
   )
+}
+
+function median(values: number[]) {
+  if (!values.length) return null
+  const sorted = [...values].sort((left, right) => left - right)
+  const midpoint = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[midpoint - 1] + sorted[midpoint]) / 2 : sorted[midpoint]
+}
+
+function standardDeviation(values: number[]) {
+  if (values.length < 2) return 0
+  const mean = values.reduce((total, value) => total + value, 0) / values.length
+  const variance = values.reduce((total, value) => total + (value - mean) ** 2, 0) / values.length
+  return Math.sqrt(variance)
+}
+
+function timingSeverity(value: number | undefined, baselineMedian: number | null, stdDev: number) {
+  if (typeof value !== 'number' || baselineMedian === null) return null
+  if (value >= baselineMedian + stdDev * 2 && value > baselineMedian) return 'high'
+  if (value > baselineMedian) return 'medium'
+  return 'low'
 }

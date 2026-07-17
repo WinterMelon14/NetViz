@@ -127,7 +127,13 @@ def run_trace(request_path: str | None = None):
                 diagnostic_specs = request["inputs"]
             from util.summary import model_summary
 
-            payload = model_summary(model, *example_args, example_kwargs=example_kwargs, run_shape_prop=False)
+            payload = model_summary(
+                model,
+                *example_args,
+                example_kwargs=example_kwargs,
+                run_shape_prop=False,
+                profile_config=request["profile"] if request["trace_mode"] == "profile" else None,
+            )
             return trace_success_for_transport(run_id, payload, request.get("output_path"))
     except UserTraceRuntimeError as exc:
         return trace_error(

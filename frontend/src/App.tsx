@@ -19,6 +19,7 @@ import type { TraceFailure } from './userTrace/traceErrorDetails'
 function App() {
   const inspectorRef = useRef<HTMLElement | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [isolatedNodeIds, setIsolatedNodeIds] = useState<Set<string> | null>(null)
   const [isInspectorOpen, setIsInspectorOpen] = useState(true)
   const [theme] = useState<'light' | 'dark'>('light')
   const [desktopTraceState, setDesktopTraceState] = useState<TraceRunState>('idle')
@@ -26,7 +27,10 @@ function App() {
   const cancellingDesktopRunId = useRef<string | null>(null)
   const [desktopTraceFailure, setDesktopTraceFailure] = useState<TraceFailure | null>(null)
   const [isUserTraceOpen, setIsUserTraceOpen] = useState(false)
-  const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
+  const onTraceApplied = useCallback(() => {
+    setSelectedNodeId(null)
+    setIsolatedNodeIds(null)
+  }, [])
   const {
     trace,
     layoutPositions,
@@ -241,6 +245,11 @@ function App() {
       onClose={() => setIsUserTraceOpen(false)}
     />
   )
+
+  const visibleLayoutNodes = isolatedNodeIds ? layoutNodes.filter((node) => isolatedNodeIds.has(node.id)) : layoutNodes
+  const visibleEdges = trace && isolatedNodeIds
+    ? trace.graph.edges.filter((edge) => isolatedNodeIds.has(edge.source) && isolatedNodeIds.has(edge.target))
+    : trace?.graph.edges
   let applicationView
   if (viewState === 'recovery' && recoveryError) {
     applicationView = (
@@ -267,8 +276,8 @@ function App() {
         <GraphPanel
           modelName={trace.model_name}
           viewportRef={viewportRef}
-          nodes={layoutNodes}
-          edges={trace.graph.edges}
+          nodes={visibleLayoutNodes}
+          edges={visibleEdges ?? []}
           nodesById={nodesById}
           outputNodeIds={outputNodeIds}
           stageBounds={stageBounds}
@@ -293,7 +302,17 @@ function App() {
               onFocusNode={(nodeId) => focusNode(nodeId, { centerCamera: true })}
             />
           ) : (
-            <ModelSummary trace={trace} outputNodes={outputNodes} />
+            <ModelSummary
+              trace={trace}
+              outputNodes={outputNodes}
+              onFocusNode={(nodeId) => focusNode(nodeId, { centerCamera: true })}
+              onIsolateNodes={(nodeIds) => {
+                setSelectedNodeId(null)
+                setIsolatedNodeIds(new Set(nodeIds))
+              }}
+              onClearIsolation={() => setIsolatedNodeIds(null)}
+              isIsolationActive={Boolean(isolatedNodeIds)}
+            />
           )}
         </aside>
 

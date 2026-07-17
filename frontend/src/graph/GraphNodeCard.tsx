@@ -11,6 +11,7 @@ import type { PositionedTraceNode } from './types'
 
 export function GraphNodeCard({
   node,
+  timingSeverity,
   isOutputNode,
   isSelected,
   onPointerDown,
@@ -19,6 +20,7 @@ export function GraphNodeCard({
   onSelectNode,
 }: {
   node: PositionedTraceNode
+  timingSeverity: 'low' | 'medium' | 'high' | null
   isOutputNode: boolean
   isSelected: boolean
   onPointerDown: (event: PointerEvent<HTMLButtonElement>, nodeId: string) => void
@@ -31,6 +33,7 @@ export function GraphNodeCard({
   const isInputNode = node.kind === 'input'
   const explanation = isInputNode ? null : explainNode(node)
   const diagnostics = nodeDiagnostics(node)
+  const medianMs = node.profile?.median_ms
 
   return (
     <button
@@ -65,8 +68,14 @@ export function GraphNodeCard({
         {diagnostics.hasNan ? <span className="node-warning-badge node-warning-badge--danger" title="Observed NaN in node output">NaN</span> : null}
         {diagnostics.hasInf ? <span className="node-warning-badge node-warning-badge--danger" title="Observed infinity in node output">Inf</span> : null}
         {diagnostics.sparsePercent !== null ? <span className="node-warning-badge node-warning-badge--sparse" title={`${diagnostics.sparsePercent.toFixed(1)}% of output values are zero`}>Sparse {Math.round(diagnostics.sparsePercent)}%</span> : null}
+        {medianMs !== undefined ? <span className={`node-warning-badge node-warning-badge--timing node-warning-badge--timing-${timingSeverity ?? 'low'}`} title="Median CPU duration">{formatNodeMs(medianMs)}</span> : null}
       </span>
       {isInputNode ? null : <span className="node-param">{totalParamLabel(node)} / {output?.memory?.human ?? '0 B'} act</span>}
     </button>
   )
+}
+
+function formatNodeMs(value: number) {
+  if (value < 1) return `${value.toFixed(2)} ms`
+  return `${value.toFixed(1)} ms`
 }

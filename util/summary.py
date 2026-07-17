@@ -4,6 +4,7 @@ import inspect
 import warnings
 from torch.fx.passes.shape_prop import ShapeProp
 from util.Interpreter import SummaryInterpreter
+from util.profiling import profile_graph_module
 from util.params import * 
 from util.ops import *
 from util.util import *
@@ -37,6 +38,7 @@ def model_summary(
     include_placeholders=True,
     include_output=False,
     run_shape_prop=True,
+    profile_config=None,
 ):
     example_kwargs = example_kwargs or {}
 
@@ -66,8 +68,10 @@ def model_summary(
 
     interp = SummaryInterpreter(gm, max_preview_items=max_preview_items)
 
+    interpreter_args = _bind_interpreter_args(gm, example_args, example_kwargs)
+
     with torch.no_grad():
-        interp.run(*_bind_interpreter_args(gm, example_args, example_kwargs))
+        interp.run(*interpreter_args)
 
     nodes = []
     edges = []
@@ -182,7 +186,7 @@ def model_summary(
         "input_specs": input_specs,
     }
 
-    return {
+    payload = {
         "model_name": model_name,
         "stats": stats,
         "graph": {
@@ -191,3 +195,26 @@ def model_summary(
         },
         "events": interp.events,
     }
+
+    if profile_config is not None:
+        profiling = profile_graph_module(
+            gm,
+            interpreter_args,
+            warmup_runs=profile_config["warmup_runs"],
+            measurement_runs=profile_config["measurement_runs"],
+            percentiles=profile_config["percentiles"],
+            graph_nodes=nodes,
+            graph_edges=edges,
+        )
+        by_node_id = {item["node_id"]: item for item in profiling["nodes"]}
+        for node in nodes:
+            timing = by_node_id.get(node["id"])
+            if timing and timing["sample_count"] > 0:
+                node["profile"] = {
+                    "sample_count": timing["sample_count"],
+                    "median_ms": timing["median_ms"],
+                    "percentiles_ms": timing["percentiles_ms"],
+                }
+        payload["profiling"] = profiling
+
+    return payload

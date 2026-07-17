@@ -28,6 +28,12 @@ export type StructuredInputSpec =
 
 type TraceRequestBase = {
   run_id: string
+  trace_mode?: 'trace' | 'profile'
+  profile?: {
+    warmup_runs: number
+    measurement_runs: number
+    percentiles: number[]
+  }
   source: {
     source_id: string
     class_name: string
@@ -56,6 +62,8 @@ export type UserTraceWorkerRequest = {
   protocol_version: 1
   input_schema_version?: 1 | 2
   run_id: string
+  trace_mode?: 'trace' | 'profile'
+  profile?: TraceRequestBase['profile']
   output_path: string
   source: {
     file_path: string

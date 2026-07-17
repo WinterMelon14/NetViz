@@ -52,6 +52,11 @@ export type TraceNode = {
   params?: ParamsInfo
   attrs?: Record<string, unknown>
   formula?: string
+  profile?: {
+    sample_count: number
+    median_ms: number
+    percentiles_ms: Record<string, number>
+  }
 }
 
 export type TraceEdge = {
@@ -85,5 +90,47 @@ export type TracePayload = {
   graph: {
     nodes: TraceNode[]
     edges: TraceEdge[]
+  }
+  profiling?: CPUProfilingResult
+}
+
+export type CPUNodeTiming = {
+  node_id: string
+  label: string
+  kind: string
+  target: string
+  module_path?: string | null
+  sample_count: number
+  median_ms: number | null
+  percentiles_ms: Record<string, number>
+}
+
+export type CPUProfilingResult = {
+  schemaVersion: 1
+  mode: 'cpu'
+  config: {
+    warmup_runs: number
+    measurement_runs: number
+    percentiles: number[]
+  }
+  environment: {
+    timer: string
+    python: string
+    torch: string
+    device: 'cpu'
+  }
+  semantics: {
+    duration: string
+    aggregation: string
+    repeated_execution: number
+  }
+  total_profiled_ms: number
+  nodes: CPUNodeTiming[]
+  expensive_operations: CPUNodeTiming[]
+  critical_path: {
+    node_ids: string[]
+    total_ms: number
+    weight: 'median_ms'
+    missing_timing_nodes: string[]
   }
 }

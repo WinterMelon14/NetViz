@@ -8,6 +8,13 @@ DEFAULT_INTEGER_MAX_EXCLUSIVE = 10
 TRACE_DEVICE_TYPE = "cpu"
 TRACE_MODEL_MODE = "eval"
 
+# Bounds CPU profiling so repeated execution is explicit and finite.
+DEFAULT_PROFILE_WARMUP_RUNS = 1
+DEFAULT_PROFILE_MEASUREMENT_RUNS = 5
+MAX_PROFILE_WARMUP_RUNS = 5
+MAX_PROFILE_MEASUREMENT_RUNS = 25
+PROFILE_PERCENTILES = (50, 90, 95)
+
 # Version of the nonexecuting source compatibility report returned by inspection.
 COMPATIBILITY_REPORT_VERSION = 1
 

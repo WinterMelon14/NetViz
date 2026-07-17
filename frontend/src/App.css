@@ -480,6 +480,21 @@ select:focus-visible {
   background: color-mix(in srgb, var(--shape-reduced) 10%, transparent);
 }
 
+.node-warning-badge--timing-low {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.node-warning-badge--timing-medium {
+  color: var(--shape-reduced);
+  background: color-mix(in srgb, var(--shape-reduced) 12%, transparent);
+}
+
+.node-warning-badge--timing-high {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .node-shapes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -890,6 +905,62 @@ code {
 .input-spec strong {
   color: var(--text-strong);
   font-family: var(--sans);
+}
+
+.profiling-table {
+  display: grid;
+  gap: 6px;
+}
+
+.profiling-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profiling-actions button {
+  min-height: 32px;
+}
+
+.profiling-table [role='row'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px 74px 52px;
+  gap: 8px;
+  align-items: center;
+}
+
+.profiling-table > div[role='row'] {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.profiling-table > button[role='row'] {
+  width: 100%;
+  min-height: 0;
+  justify-content: stretch;
+  padding: 8px;
+  border-color: var(--hairline);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--card);
+  text-align: left;
+}
+
+.profiling-table span[role='cell'],
+.profiling-table span[role='columnheader'] {
+  min-width: 0;
+}
+
+.profiling-table span[role='cell']:first-child {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.profiling-table span[role='cell']:not(:first-child),
+.profiling-table span[role='columnheader']:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .modal-backdrop {
@@ -1429,6 +1500,31 @@ code {
   margin: 6px 0 0;
   padding-left: 18px;
   color: var(--text-strong);
+}
+
+.profile-run-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-run-controls label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.profile-run-controls label span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.profile-run-controls input {
+  width: 96px;
 }
 
 @media (max-width: 680px) {

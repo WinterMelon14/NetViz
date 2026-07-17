@@ -25,6 +25,11 @@ import {
 
 export type UserTraceDraft = Omit<UserTraceBridgeRequest, 'run_id'>
 
+const DEFAULT_PROFILE_WARMUP_RUNS = 1
+const DEFAULT_PROFILE_MEASUREMENT_RUNS = 5
+const MAX_PROFILE_WARMUP_RUNS = 5
+const MAX_PROFILE_MEASUREMENT_RUNS = 25
+
 function trustStorageKey(contentSha256: string) {
   return `${TRUSTED_SOURCE_STORAGE_PREFIX}${contentSha256}`
 }
@@ -75,6 +80,9 @@ export function UserTracePanel({
   const [inputSignatureError, setInputSignatureError] = useState<string | null>(null)
   const [inputSignatureNotice, setInputSignatureNotice] = useState<string | null>(null)
   const [useProviderInputs, setUseProviderInputs] = useState(false)
+  const [profileEnabled, setProfileEnabled] = useState(false)
+  const [profileWarmupRuns, setProfileWarmupRuns] = useState(DEFAULT_PROFILE_WARMUP_RUNS)
+  const [profileMeasurementRuns, setProfileMeasurementRuns] = useState(DEFAULT_PROFILE_MEASUREMENT_RUNS)
   const [isSelecting, setIsSelecting] = useState(false)
   const [isInspecting, setIsInspecting] = useState(false)
   const requestIdRef = useRef(0)
@@ -172,6 +180,9 @@ export function UserTracePanel({
     setInputSignatureError(null)
     setInputSignatureNotice(null)
     setUseProviderInputs(false)
+    setProfileEnabled(false)
+    setProfileWarmupRuns(DEFAULT_PROFILE_WARMUP_RUNS)
+    setProfileMeasurementRuns(DEFAULT_PROFILE_MEASUREMENT_RUNS)
     setTrustedCodeConfirmed(false)
     setInspection(null)
     setInspectionError(null)
@@ -256,6 +267,8 @@ export function UserTracePanel({
         content_sha256: sourceIdentity.contentSha256,
       },
       project_context: activeInspection.projectContext,
+      trace_mode: profileEnabled ? 'profile' : 'trace',
+      profile: profileEnabled ? { warmup_runs: profileWarmupRuns, measurement_runs: profileMeasurementRuns, percentiles: [50, 90, 95] } : undefined,
       constructor: { args: constructorValidation.args, kwargs: constructorValidation.kwargs },
       input_schema_version: 2,
       args: useProviderInputs || !inputValidation.ok ? [] : inputValidation.args,
@@ -404,8 +417,51 @@ export function UserTracePanel({
 
         {activeInspection?.projectContext ? <ProjectScopeSummary projectContext={activeInspection.projectContext} /> : null}
 
+        <section className="user-trace-section profile-config-section">
+          <div className="user-trace-section-heading"><div><span>{activeInspection?.projectContext ? 7 : 6}</span><strong>CPU profiling</strong></div></div>
+          <label className="provider-input-toggle">
+            <input
+              type="checkbox"
+              checked={profileEnabled}
+              disabled={isTraceActive}
+              onChange={(event) => {
+                onClearError()
+                setProfileEnabled(event.target.checked)
+              }}
+            />
+            Profile CPU duration for this run
+          </label>
+          {profileEnabled ? (
+            <div className="profile-run-controls">
+              <label>
+                <span>Warmups</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_PROFILE_WARMUP_RUNS}
+                  value={profileWarmupRuns}
+                  disabled={isTraceActive}
+                  onChange={(event) => setProfileWarmupRuns(clampInteger(event.target.value, 0, MAX_PROFILE_WARMUP_RUNS, DEFAULT_PROFILE_WARMUP_RUNS))}
+                />
+              </label>
+              <label>
+                <span>Measurements</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={MAX_PROFILE_MEASUREMENT_RUNS}
+                  value={profileMeasurementRuns}
+                  disabled={isTraceActive}
+                  onChange={(event) => setProfileMeasurementRuns(clampInteger(event.target.value, 1, MAX_PROFILE_MEASUREMENT_RUNS, DEFAULT_PROFILE_MEASUREMENT_RUNS))}
+                />
+              </label>
+              <p className="source-muted">Profiling executes the model {profileWarmupRuns + profileMeasurementRuns + 1} total times including the ordinary trace run. Warmups are excluded from timing aggregates.</p>
+            </div>
+          ) : null}
+        </section>
+
         <section className="user-trace-section trusted-code-confirmation">
-          <div className="user-trace-section-heading"><div><span>{activeInspection?.projectContext ? 7 : 6}</span><strong>Execute trusted code</strong></div></div>
+          <div className="user-trace-section-heading"><div><span>{activeInspection?.projectContext ? 8 : 7}</span><strong>Execute trusted code</strong></div></div>
           <p>Tracing imports and executes this local Python source with your user permissions. The worker isolates crashes and state, but it is not a security sandbox. Static inspection does not verify that code is safe.</p>
           <label>
             <input
@@ -442,6 +498,12 @@ export function UserTracePanel({
       </section>
     </div>
   )
+}
+
+function clampInteger(value: string, min: number, max: number, fallback: number) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
 }
 
 function ProjectScopeSummary({ projectContext }: { projectContext: ProjectContext }) {
