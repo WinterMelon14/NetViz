@@ -80,6 +80,19 @@ function product(values: number[]) {
   return values.reduce((acc, value) => acc * value, 1)
 }
 
+function normalizeDim(dim: number, rank: number) {
+  return dim < 0 ? rank + dim : dim
+}
+
+function normalizeInsertionDim(dim: number, outputRank: number) {
+  return dim < 0 ? outputRank + dim : dim
+}
+
+function rightAlignedShapeValue(shape: number[], targetRank: number, targetDim: number) {
+  const offset = targetRank - shape.length
+  return shape[targetDim - offset] ?? 1
+}
+
 function numberPair(value: unknown, fallback: [number, number]) {
   if (Array.isArray(value)) {
     const first = Number(value[0] ?? fallback[0])
@@ -357,6 +370,7 @@ function explainMaxPool1d(node: TraceNodeForExplanation): Explanation | null {
   const [s] = numberPair(node.attrs?.stride, [k, k])
   const [p] = numberPair(node.attrs?.padding, [0, 0])
   const [d] = numberPair(node.attrs?.dilation, [1, 1])
+  const ceilMode = node.attrs?.ceil_mode === true
 
   return {
     title: 'MaxPool1d',
@@ -375,13 +389,17 @@ function explainMaxPool1d(node: TraceNodeForExplanation): Explanation | null {
       ' slides a 1D window along the sequence length and keeps the maximum value in each window. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
-      substitution: `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}`,
+      display: ceilMode
+        ? 'out = ceil((in + 2p - d(k - 1) - 1 + (s - 1)) / s) + 1, then drop windows starting in right padding'
+        : 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
+      substitution: ceilMode ? undefined : `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Length', from: l, to: lOut, substitution: `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}` },
+      ceilMode
+        ? { label: 'Length', from: l, to: lOut, reason: 'Ceil mode may include one extra pooling position, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Length', from: l, to: lOut, substitution: `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}` },
     ],
   }
 }
@@ -397,6 +415,7 @@ function explainMaxPool2d(node: TraceNodeForExplanation): Explanation | null {
   const [sh, sw] = numberPair(node.attrs?.stride, [kh, kw])
   const [ph, pw] = numberPair(node.attrs?.padding, [0, 0])
   const [dh, dw] = numberPair(node.attrs?.dilation, [1, 1])
+  const ceilMode = node.attrs?.ceil_mode === true
 
   return {
     title: 'MaxPool2d',
@@ -415,14 +434,20 @@ function explainMaxPool2d(node: TraceNodeForExplanation): Explanation | null {
       ' slides a 2D window over height and width and keeps the maximum value in each window. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
-      substitution: `H: floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}`,
+      display: ceilMode
+        ? 'out = ceil((in + 2p - d(k - 1) - 1 + (s - 1)) / s) + 1, then drop windows starting in right padding'
+        : 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
+      substitution: ceilMode ? undefined : `H: floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` },
-      { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` },
+      ceilMode
+        ? { label: 'Height', from: h, to: hOut, reason: 'Ceil mode may include one extra pooling position, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` },
+      ceilMode
+        ? { label: 'Width', from: w, to: wOut, reason: 'Ceil mode may include one extra pooling position, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` },
     ],
   }
 }
@@ -438,6 +463,7 @@ function explainMaxPool3d(node: TraceNodeForExplanation): Explanation | null {
   const [sd, sh, sw] = numberTriple(node.attrs?.stride, [kd, kh, kw])
   const [pd, ph, pw] = numberTriple(node.attrs?.padding, [0, 0, 0])
   const [dd, dh, dw] = numberTriple(node.attrs?.dilation, [1, 1, 1])
+  const ceilMode = node.attrs?.ceil_mode === true
 
   return {
     title: 'MaxPool3d',
@@ -454,15 +480,23 @@ function explainMaxPool3d(node: TraceNodeForExplanation): Explanation | null {
       ' slides a 3D window over depth, height, and width and keeps the maximum value in each window. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
-      substitution: `D: floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}`,
+      display: ceilMode
+        ? 'out = ceil((in + 2p - d(k - 1) - 1 + (s - 1)) / s) + 1, then drop windows starting in right padding'
+        : 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
+      substitution: ceilMode ? undefined : `D: floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Depth', from: d, to: dOut, substitution: `floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}` },
-      { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` },
-      { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` },
+      ceilMode
+        ? { label: 'Depth', from: d, to: dOut, reason: 'Ceil mode may include one extra pooling position, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Depth', from: d, to: dOut, substitution: `floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}` },
+      ceilMode
+        ? { label: 'Height', from: h, to: hOut, reason: 'Ceil mode may include one extra pooling position, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` },
+      ceilMode
+        ? { label: 'Width', from: w, to: wOut, reason: 'Ceil mode may include one extra pooling position, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` },
     ],
   }
 }
@@ -614,13 +648,13 @@ function explainAdaptiveAvgPool1d(node: TraceNodeForExplanation): Explanation | 
       '. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'stride = floor(in / out), kernel = in - (out - 1) * stride',
+      display: 'output bins partition the input dimension into regions that average to the requested output size',
       substitution: `L: ${l} ⟶ ${lOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Length', from: l, to: lOut, reason: `Output length is fixed at ${lOut}; kernel and stride are inferred.` },
+      { label: 'Length', from: l, to: lOut, reason: `Output length is fixed at ${lOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
     ],
   }
 }
@@ -648,14 +682,14 @@ function explainAdaptiveAvgPool2d(node: TraceNodeForExplanation): Explanation | 
       '. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'stride = floor(in / out), kernel = in - (out - 1) * stride',
+      display: 'output bins partition each input dimension into regions that average to the requested output size',
       substitution: `H: ${h} ⟶ ${hOut}, W: ${w} ⟶ ${wOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; kernel and stride are inferred.` },
-      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; kernel and stride are inferred.` },
+      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
+      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
     ],
   }
 }
@@ -683,21 +717,57 @@ function explainAdaptiveAvgPool3d(node: TraceNodeForExplanation): Explanation | 
       '. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'stride = floor(in / out), kernel = in - (out - 1) * stride',
+      display: 'output bins partition each input dimension into regions that average to the requested output size',
       substitution: `D: ${d} ⟶ ${dOut}, H: ${h} ⟶ ${hOut}, W: ${w} ⟶ ${wOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Depth', from: d, to: dOut, reason: `Output depth is fixed at ${dOut}; kernel and stride are inferred.` },
-      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; kernel and stride are inferred.` },
-      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; kernel and stride are inferred.` },
+      { label: 'Depth', from: d, to: dOut, reason: `Output depth is fixed at ${dOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
+      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
+      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
     ],
   }
 }
 // ============================================================================
 // Normalization Layers
 // ============================================================================
+
+function batchNormStatSource(node: TraceNodeForExplanation): Array<string | TextPart> {
+  const training = node.attrs?.training === true
+  const trackRunningStats = node.attrs?.track_running_stats !== false
+  const hasRunningStats =
+    node.inputs.some((input) => input.role === 'running_mean' || input.role === 'running_var')
+    || node.attrs?.running_mean !== undefined
+    || node.attrs?.running_var !== undefined
+    || node.attrs?.track_running_stats === true
+
+  if (training || !trackRunningStats) return ['statistics computed from the current batch']
+  if (hasRunningStats) return ['stored running statistics from training']
+  return ['stored running statistics when available; otherwise current-batch statistics']
+}
+
+function batchNormAffineDescription(node: TraceNodeForExplanation): Array<string | TextPart> {
+  if (node.attrs?.affine === false) return ['. No learned affine scale or bias is applied.']
+
+  const hasWeight = node.attrs?.weight !== false
+  const hasBias = node.attrs?.bias !== false
+  if (hasWeight && hasBias) {
+    return [', then applies learned per-channel ', code('weight'), ' and ', code('bias'), '.']
+  }
+  if (hasWeight) return [', then applies learned per-channel ', code('weight'), '.']
+  if (hasBias) return [', then applies learned per-channel ', code('bias'), '.']
+  return ['. No learned affine scale or bias is applied.']
+}
+
+function batchNormFormula(node: TraceNodeForExplanation) {
+  if (node.attrs?.affine === false || (node.attrs?.weight === false && node.attrs?.bias === false)) {
+    return 'out = (x - mean) / sqrt(var + eps)'
+  }
+  if (node.attrs?.bias === false) return 'out = (x - mean) / sqrt(var + eps) * weight'
+  if (node.attrs?.weight === false) return 'out = (x - mean) / sqrt(var + eps) + bias'
+  return 'out = (x - mean) / sqrt(var + eps) * weight + bias'
+}
 
 function explainBatchNorm1d(node: TraceNodeForExplanation): Explanation | null {
   const inputShape = tensorValues(node.inputs)[0]?.shape
@@ -706,11 +776,8 @@ function explainBatchNorm1d(node: TraceNodeForExplanation): Explanation | null {
 
   const [n, c, l] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
-  const training = node.attrs?.training ?? false
-
-  const statSource: Array<string | TextPart> = training
-    ? ['statistics computed from the current batch']
-    : ['stored ', code('running_mean'), ' and ', code('running_var'), ' from training']
+  const statSource = batchNormStatSource(node)
+  const affineDescription = batchNormAffineDescription(node)
 
   const spatialNote: Array<string | TextPart> = l !== undefined
     ? [` across N=${n}, L=${l} for each channel`]
@@ -727,14 +794,10 @@ function explainBatchNorm1d(node: TraceNodeForExplanation): Explanation | null {
       code(`eps=${eps}`),
       ')',
       ...spatialNote,
-      ', then applies a learned per-channel ',
-      code('weight'),
-      ' and ',
-      code('bias'),
-      '.',
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - running_mean) / sqrt(running_var + eps) * weight + bias',
+      display: batchNormFormula(node),
       substitution: l !== undefined
         ? `stats computed per-channel over N=${n}, L=${l}`
         : `stats computed per-feature over N=${n}`,
@@ -752,11 +815,8 @@ function explainBatchNorm2d(node: TraceNodeForExplanation): Explanation | null {
 
   const [n, c, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
-  const training = node.attrs?.training ?? false
-
-  const statSource: Array<string | TextPart> = training
-    ? ['statistics computed from the current batch']
-    : ['stored ', code('running_mean'), ' and ', code('running_var'), ' from training']
+  const statSource = batchNormStatSource(node)
+  const affineDescription = batchNormAffineDescription(node)
 
   return {
     title: 'BatchNorm2d',
@@ -767,14 +827,11 @@ function explainBatchNorm2d(node: TraceNodeForExplanation): Explanation | null {
       ...statSource,
       '. It subtracts the mean and divides by the standard deviation (',
       code(`eps=${eps}`),
-      `) across N=${n}, H=${h}, W=${w} for each channel, then applies a learned per-channel `,
-      code('weight'),
-      ' and ',
-      code('bias'),
-      '.',
+      `) across N=${n}, H=${h}, W=${w} for each channel`,
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - running_mean) / sqrt(running_var + eps) * weight + bias',
+      display: batchNormFormula(node),
       substitution: `stats computed per-channel over N=${n}, H=${h}, W=${w}`,
     },
     shapeSteps: [
@@ -790,11 +847,8 @@ function explainBatchNorm3d(node: TraceNodeForExplanation): Explanation | null {
 
   const [n, c, d, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
-  const training = node.attrs?.training ?? false
-
-  const statSource: Array<string | TextPart> = training
-    ? ['statistics computed from the current batch']
-    : ['stored ', code('running_mean'), ' and ', code('running_var'), ' from training']
+  const statSource = batchNormStatSource(node)
+  const affineDescription = batchNormAffineDescription(node)
 
   return {
     title: 'BatchNorm3d',
@@ -805,14 +859,11 @@ function explainBatchNorm3d(node: TraceNodeForExplanation): Explanation | null {
       ...statSource,
       '. It subtracts the mean and divides by the standard deviation (',
       code(`eps=${eps}`),
-      `) across N=${n}, D=${d}, H=${h}, W=${w} for each channel, then applies a learned per-channel `,
-      code('weight'),
-      ' and ',
-      code('bias'),
-      '.',
+      `) across N=${n}, D=${d}, H=${h}, W=${w} for each channel`,
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - running_mean) / sqrt(running_var + eps) * weight + bias',
+      display: batchNormFormula(node),
       substitution: `stats computed per-channel over N=${n}, D=${d}, H=${h}, W=${w}`,
     },
     shapeSteps: [
@@ -873,7 +924,7 @@ function explainRMSNorm(node: TraceNodeForExplanation): Explanation | null {
       code('weight'),
       '. It skips the mean subtraction step of ',
       code('LayerNorm'),
-      ', making it cheaper while performing comparably. Used in LLaMA, Mistral, and other modern LLMs.',
+      ', so it can be cheaper and has been used successfully in LLaMA, Mistral, and other modern LLMs.',
     ),
     formula: {
       display: 'out = x / sqrt(mean(x^2) + eps) * weight',
@@ -889,9 +940,8 @@ function explainGroupNorm(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const [n, c] = inputShape
+  const [, c] = inputShape
   const numGroups = Number(node.attrs?.num_groups ?? 1)
-  const eps = Number(node.attrs?.eps ?? 1e-5)
   const chansPerGroup = c / numGroups
 
   return {
@@ -926,7 +976,7 @@ function explainInstanceNorm1d(node: TraceNodeForExplanation): Explanation | nul
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape || inputShape.length < 3) return null
 
-  const [n, c, l] = inputShape
+  const [, c, l] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
 
   return {
@@ -957,7 +1007,7 @@ function explainInstanceNorm2d(node: TraceNodeForExplanation): Explanation | nul
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape || inputShape.length < 4) return null
 
-  const [n, c, h, w] = inputShape
+  const [, c, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
 
   return {
@@ -986,7 +1036,7 @@ function explainInstanceNorm3d(node: TraceNodeForExplanation): Explanation | nul
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape || inputShape.length < 5) return null
 
-  const [n, c, d, h, w] = inputShape
+  const [, c, d, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
 
   return {
@@ -1057,7 +1107,7 @@ function explainLeakyReLU(node: TraceNodeForExplanation): Explanation | null {
       code('LeakyReLU'),
       ' passes positive values through unchanged and scales negative values by ',
       code(`negative_slope=${slope}`),
-      ' instead of clamping them to zero. This prevents dead neurons during training.',
+      ' instead of clamping them to zero. This can reduce dead-neuron behavior during training.',
       ...(inplace ? [' Operates ', code('in-place'), ' on the input tensor.'] : []),
     ),
     formula: { display: `out = x if x >= 0 else ${slope} * x` },
@@ -1080,7 +1130,7 @@ function explainELU(node: TraceNodeForExplanation): Explanation | null {
       code('ELU'),
       ' passes positive values through unchanged and replaces negative values with ',
       code(`alpha * (exp(x) - 1)`),
-      ` (alpha=${alpha}). Unlike Leaky ReLU, the negative branch is smooth and saturates, which can help with vanishing gradients.`,
+      ` (alpha=${alpha}). Unlike Leaky ReLU, the negative branch is smooth and saturates, which can help gradient flow in some networks.`,
       ...(inplace ? [' Operates ', code('in-place'), ' on the input tensor.'] : []),
     ),
     formula: { display: `out = x if x >= 0 else ${alpha} * (exp(x) - 1)` },
@@ -1102,7 +1152,7 @@ function explainSELU(node: TraceNodeForExplanation): Explanation | null {
       code('alpha ≈ 1.6733'),
       ' and ',
       code('scale ≈ 1.0507'),
-      ' chosen so that activations self-normalize toward zero mean and unit variance through deep networks, without needing BatchNorm.',
+      ' designed to help activations self-normalize toward zero mean and unit variance in compatible network architectures.',
     ),
     formula: { display: 'out = scale * (x if x >= 0 else alpha * (exp(x) - 1))' },
     shapeSteps: [{ label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape ?? inputShape), reason: noChange }],
@@ -1194,9 +1244,9 @@ function explainSiLU(node: TraceNodeForExplanation): Explanation | null {
     short: rich('Swish/SiLU: ', code('x * sigmoid(x)'), ' element-wise'),
     description: rich(
       code('SiLU'),
-      ' (also called Swish) multiplies each value by its own sigmoid, producing a smooth non-monotonic activation. It consistently outperforms ',
+      ' (also called Swish) multiplies each value by its own sigmoid, producing a smooth non-monotonic activation. It can outperform ',
       code('ReLU'),
-      ' on deep models and is the default activation in many modern architectures.',
+      ' on some deep models and is the default activation in many modern architectures.',
     ),
     formula: { display: 'out = x * sigmoid(x) = x / (1 + exp(-x))' },
     shapeSteps: [{ label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape ?? inputShape), reason: noChange }],
@@ -1260,8 +1310,8 @@ function explainSoftmax(node: TraceNodeForExplanation): Explanation | null {
       code('Softmax'),
       ' exponentiates each value and divides by the sum of all exponentiated values along the target dimension. The output sums to ',
       code('1'),
-      ' and is always in the range ',
-      code('(0, 1)'),
+      ' and is in the range ',
+      code('[0, 1]'),
       ', making it suitable for multi-class classification outputs.',
     ),
     formula: { display: 'out_i = exp(x_i) / sum(exp(x_j))' },
@@ -1344,12 +1394,14 @@ function explainSoftplus(node: TraceNodeForExplanation): Explanation | null {
 
   return {
     title: 'Softplus',
-    short: rich('Smooth approximation of ', code('ReLU'), ': always positive, never exactly zero'),
+    short: rich('Smooth approximation of ', code('ReLU'), ': non-negative for finite inputs'),
     description: rich(
       code('Softplus'),
       ' computes ',
       code(`(1 / beta) * log(1 + exp(beta * x))`),
-      ` (beta=${beta}). It approximates ReLU but is smooth and strictly positive everywhere. Reverts to a linear function above the threshold `,
+      ` (beta=${beta}). It approximates ReLU but is smooth and mathematically positive for finite real inputs. Reverts to a linear function when `,
+      code('beta * input'),
+      ' is above the threshold ',
       code(`${threshold}`),
       ' for numerical stability.',
     ),
@@ -1426,7 +1478,7 @@ function explainDropout1d(node: TraceNodeForExplanation): Explanation | null {
           code('Dropout1d'),
           ' drops entire channels rather than individual elements. Every value in a channel is zeroed together with probability ',
           code(`p=${p}`),
-          '. This is more effective than element-wise dropout for 1D inputs like sequences, since adjacent elements in a channel are often correlated.',
+          '. This can be more effective than element-wise dropout for 1D inputs like sequences when adjacent elements in a channel are correlated.',
         )
       : rich(
           code('Dropout1d'),
@@ -1469,9 +1521,9 @@ function explainDropout2d(node: TraceNodeForExplanation): Explanation | null {
           code('Dropout2d'),
           ' drops entire H×W feature maps rather than individual elements. Every spatial position in a channel is zeroed together with probability ',
           code(`p=${p}`),
-          '. Recommended over element-wise ',
+          '. It is often used instead of element-wise ',
           code('Dropout'),
-          ' for convolutional feature maps, where spatially adjacent values are strongly correlated.',
+          ' for convolutional feature maps, where spatially adjacent values can be strongly correlated.',
         )
       : rich(
           code('Dropout2d'),
@@ -1547,7 +1599,6 @@ function explainAlphaDropout(node: TraceNodeForExplanation): Explanation | null 
 
   const p = Number(node.attrs?.p ?? 0.5)
   const training = node.attrs?.training ?? true
-  const pct = Math.round(p * 100)
 
   return {
     title: 'AlphaDropout',
@@ -1646,12 +1697,12 @@ const inputShape = tensorValues(node.inputs)[0]?.shape
 
   return {
     title: "reshape",
-    short: rich("Returns a copy of the original tensor with a new shape"),
+    short: rich("Returns the tensor with a new shape, using a view when possible and a copy when required"),
     description: rich(
       code("reshape"),
       ' changes the shape of the tensor without changing its data or total number of elements (',
       code(`${totalIn}`),
-      ' elements).',
+      ' elements). PyTorch returns a view when the existing storage layout permits it, otherwise it makes a copy.',
     ),
     formula: {
       display: `out = ${"reshape"}(input, shape)`,
@@ -1696,12 +1747,12 @@ function explainView(node: TraceNodeForExplanation): Explanation | null {
 
   return {
     title: "view",
-    short: rich("Returns the original tensor with a new shape"),
+    short: rich("Returns a view sharing the input data, with a different shape"),
     description: rich(
       code("view"),
-      ' changes the shape of the tensor without changing its data or total number of elements (',
+      ' returns a new tensor object sharing the same underlying data with a different shape. It preserves the total number of elements (',
       code(`${totalIn}`),
-      ' elements).',
+      ' elements) and requires the requested shape to be compatible with the input size and strides.',
     ),
     formula: {
       display: `out = ${"view"}(input, shape)`,
@@ -1736,7 +1787,7 @@ function explainPermute(node: TraceNodeForExplanation): Explanation | null {
   if (!inputShape || !outputShape) return null
 
   const rawDims = node.attrs?.dims ?? node.attrs?.dim
-  const dims = Array.isArray(rawDims) ? rawDims.map(Number) : undefined
+  const dims = Array.isArray(rawDims) ? rawDims.map((dim) => normalizeDim(Number(dim), inputShape.length)) : undefined
 
   return {
     title: 'permute',
@@ -1778,8 +1829,8 @@ function explainTranspose(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const dim0 = Number(node.attrs?.dim0 ?? 0)
-  const dim1 = Number(node.attrs?.dim1 ?? 1)
+  const dim0 = normalizeDim(Number(node.attrs?.dim0 ?? 0), inputShape.length)
+  const dim1 = normalizeDim(Number(node.attrs?.dim1 ?? 1), inputShape.length)
 
   return {
     title: 'transpose',
@@ -1790,7 +1841,7 @@ function explainTranspose(node: TraceNodeForExplanation): Explanation | null {
       code(`${dim1}`),
       ': ',
       code(shapeText(inputShape)),
-      ' → ',
+      ' ⟶ ',
       code(shapeText(outputShape))
     ),
     description: rich(
@@ -1826,7 +1877,7 @@ function explainUnsqueeze(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const dim = Number(node.attrs?.dim ?? 0)
+  const dim = normalizeDim(Number(node.attrs?.dim ?? 0), inputShape.length)
 
   return {
     title: 'unsqueeze',
@@ -1837,7 +1888,7 @@ function explainUnsqueeze(node: TraceNodeForExplanation): Explanation | null {
       code(`${dim}`),
       ': ',
       code(shapeText(inputShape)),
-      ' → ',
+      ' ⟶ ',
       code(shapeText(outputShape))
     ),
     description: rich(
@@ -1850,7 +1901,7 @@ function explainUnsqueeze(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: `out = unsqueeze(input, dim=${dim})`,
-      substitution: `${shapeText(inputShape)} → ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -1875,7 +1926,7 @@ function explainExpand(node: TraceNodeForExplanation): Explanation | null {
   if (!inputShape || !outputShape) return null
 
   const expandedDims = outputShape
-    .map((size, i) => ({ i, from: inputShape[i] ?? 1, to: size }))
+    .map((size, i) => ({ i, from: rightAlignedShapeValue(inputShape, outputShape.length, i), to: size }))
     .filter(({ from, to }) => from !== to)
 
   return {
@@ -1897,7 +1948,7 @@ function explainExpand(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = input.expand(size)  # stride trick, no copy',
-      substitution: `${shapeText(inputShape)} → ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: expandedDims.length
       ? expandedDims.map(({ i, from, to }) => ({
@@ -1917,7 +1968,7 @@ function explainContiguous(node: TraceNodeForExplanation): Explanation | null {
 
   return {
     title: 'contiguous',
-    short: rich('Forces a contiguous memory layout'),
+    short: rich('Returns a tensor with contiguous memory layout'),
     description: rich(
       code('contiguous'),
       ' returns a tensor with the same data laid out contiguously in memory. Operations like ',
@@ -1926,7 +1977,7 @@ function explainContiguous(node: TraceNodeForExplanation): Explanation | null {
       code('transpose'),
       ' only change strides without moving data; ',
       code('contiguous'),
-      ' forces an actual copy into a standard row-major layout. Often required before calling ',
+      ' returns the original tensor if it already has the requested contiguous layout, or copies into that layout when needed. Often required before calling ',
       code('view'),
       '.',
     ),
@@ -1950,7 +2001,7 @@ function explainChunk(node: TraceNodeForExplanation): Explanation | null {
   if (!inputShape || !outputs.length) return null
 
   const chunks = Number(node.attrs?.chunks ?? outputs.length)
-  const dim = Number(node.attrs?.dim ?? 0)
+  const dim = normalizeDim(Number(node.attrs?.dim ?? 0), inputShape.length)
   const dimSize = inputShape[dim]
 
   return {
@@ -1965,15 +2016,15 @@ function explainChunk(node: TraceNodeForExplanation): Explanation | null {
     ),
     description: rich(
       code('chunk'),
-      ' splits a tensor into ',
+      ' attempts to split a tensor into ',
       code(`${chunks}`),
-      ' equal-sized pieces along dimension ',
+      ' pieces along dimension ',
       code(`${dim}`),
-      ` (size ${dimSize}). If the dimension is not evenly divisible, the last chunk is smaller. Commonly used in multi-head attention to split Q, K, and V from a single projection.`,
+      ` (size ${dimSize}). PyTorch may return fewer pieces than requested, and returned chunks are views. If the dimension is not evenly divisible, chunk sizes can differ. Commonly used in multi-head attention to split Q, K, and V from a single projection.`,
     ),
     formula: {
       display: `out = chunk(input, ${chunks}, dim=${dim})`,
-      substitution: `dim ${dim} (size ${dimSize}) → ${outputs.map((o) => o.shape?.[dim] ?? '?').join(', ')}`,
+      substitution: `dim ${dim} (size ${dimSize}) ⟶ ${outputs.map((o) => o.shape?.[dim] ?? '?').join(', ')}`,
     },
     shapeSteps: outputs.map((output, i) => ({
       label: `Chunk ${i}`,
@@ -1990,7 +2041,7 @@ function explainSplit(node: TraceNodeForExplanation): Explanation | null {
   if (!inputShape || !outputs.length) return null
 
   const splitSize = node.attrs?.split_size_or_sections
-  const dim = Number(node.attrs?.dim ?? 0)
+  const dim = normalizeDim(Number(node.attrs?.dim ?? 0), inputShape.length)
   const dimSize = inputShape[dim]
 
   const splitSizeText = Array.isArray(splitSize)
@@ -2021,7 +2072,7 @@ function explainSplit(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: `out = split(input, ${splitSizeText}, dim=${dim})`,
-      substitution: `dim ${dim} (size ${dimSize}) → ${outputs.map((o) => o.shape?.[dim] ?? '?').join(', ')}`,
+      substitution: `dim ${dim} (size ${dimSize}) ⟶ ${outputs.map((o) => o.shape?.[dim] ?? '?').join(', ')}`,
     },
     shapeSteps: outputs.map((output, i) => ({
       label: `Split ${i}`,
@@ -2037,8 +2088,8 @@ function explainStack(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputs.length || !outputShape) return null
 
-  const dim = Number(node.attrs?.dim ?? 0)
   const inputShapes = inputs.map((input) => input.shape).filter(Boolean) as number[][]
+  const dim = normalizeInsertionDim(Number(node.attrs?.dim ?? 0), outputShape.length)
 
   return {
     title: 'stack',
@@ -2058,7 +2109,7 @@ function explainStack(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: 'out = stack(inputs, dim)',
-      substitution: `${inputShapes.length} × ${shapeText(inputShapes[0])} → ${shapeText(outputShape)}`,
+      substitution: `${inputShapes.length} × ${shapeText(inputShapes[0])} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
       {
@@ -2103,7 +2154,7 @@ function explainUnbind(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: `out = unbind(input, dim=${dim})`,
-      substitution: `${shapeText(inputShape)} → ${dimSize} × ${shapeText(outputs[0]?.shape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${dimSize} × ${shapeText(outputs[0]?.shape)}`,
     },
     shapeSteps: [
       {
@@ -2149,11 +2200,11 @@ function explainRepeat(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: `out = input.repeat(${repeatsText})`,
-      substitution: `${shapeText(inputShape)} → ${shapeText(outputShape)}`,
+      substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: outputShape.map((size, i) => ({
       label: `Dimension ${i}`,
-      from: inputShape[i] ?? 1,
+      from: rightAlignedShapeValue(inputShape, outputShape.length, i),
       to: size,
       reason: Array.isArray(repeats)
         ? `Repeated ${repeats[i]} time${repeats[i] === 1 ? '' : 's'}.`
@@ -2167,7 +2218,7 @@ function explainNarrow(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const dim = Number(node.attrs?.dim ?? 0)
+  const dim = normalizeDim(Number(node.attrs?.dim ?? 0), inputShape.length)
   const start = Number(node.attrs?.start ?? 0)
   const length = Number(node.attrs?.length ?? outputShape[dim])
 
@@ -2182,18 +2233,16 @@ function explainNarrow(node: TraceNodeForExplanation): Explanation | null {
       code(`${start + length}`),
       ': ',
       code(shapeText(inputShape)),
-      ' → ',
+      ' ⟶ ',
       code(shapeText(outputShape))
     ),
     description: rich(
       code('narrow'),
-      ' returns a slice of the tensor along a single dimension. It is equivalent to ',
-      code(`input.select`),
-      ' but preserves the rank, so the sliced dimension shrinks rather than disappearing.',
+      ' returns a contiguous slice of the tensor along a single dimension. It is equivalent to slicing one dimension with a bounded range and preserves rank, so the sliced dimension shrinks rather than disappearing.',
     ),
     formula: {
       display: `out = narrow(input, dim=${dim}, start=${start}, length=${length})`,
-      substitution: `dim ${dim}: ${inputShape[dim]} → ${length}  (indices ${start}..${start + length - 1})`,
+      substitution: `dim ${dim}: ${inputShape[dim]} ⟶ ${length}  (indices ${start}..${start + length - 1})`,
     },
     shapeSteps: [
       {
@@ -2294,8 +2343,8 @@ function explainCat(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputs.length || !outputShape) return null
 
-  const dim = Number(node.attrs?.dim ?? inputs.find((input) => input.role === 'dim')?.value ?? 0)
   const inputShapes = inputs.map((input) => input.shape).filter(Boolean) as number[][]
+  const dim = normalizeDim(Number(node.attrs?.dim ?? inputs.find((input) => input.role === 'dim')?.value ?? 0), inputShapes[0]?.length ?? outputShape.length)
 
   return {
     title: 'Concatenate',
@@ -2346,8 +2395,7 @@ function explainAdd(node: TraceNodeForExplanation): Explanation | null {
       ' and ',
       code(shapeText(shapeB)),
       ' element-wise',
-      ...(broadcasts ? [' with broadcasting'] : []),
-      '.',
+      ...(broadcasts ? [' with broadcasting'] : [])
     ),
     description: rich(
       code('add'),
@@ -2381,25 +2429,20 @@ function explainPad(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const allInputs = node.inputs as Array<{ role: string; value?: unknown; shape?: number[] }>
-
-  // Pad amounts are positional scalar inputs after the tensor
-  const pad = allInputs
-    .filter((input) => input.role === 'scalar')
-    .map((input) => Number(input.value))
-
-  // Mode and fill value come from constant inputs, falling back to attrs.kwargs
-  const constants = allInputs.filter((input) => input.role === 'constant')
-  const mode = String(constants[0]?.value ?? (node.attrs?.kwargs as Record<string, unknown>)?.mode ?? 'constant')
-  const fillValue = constants[1]?.value ?? (node.attrs?.kwargs as Record<string, unknown>)?.value ?? 0
+  const kwargs = node.attrs?.kwargs as Record<string, unknown> | undefined
+  const rawPad = node.attrs?.pad ?? node.attrs?.padding ?? kwargs?.pad
+  const parsedPad = Array.isArray(rawPad) ? rawPad.map(Number) : null
+  const pad = parsedPad?.every(Number.isFinite) ? parsedPad : null
+  const mode = typeof node.attrs?.mode === 'string' ? node.attrs.mode : typeof kwargs?.mode === 'string' ? kwargs.mode : null
+  const fillValue = node.attrs?.value ?? kwargs?.value
 
   // pad list applies from the last dimension backwards: [left_-1, right_-1, left_-2, right_-2, ...]
-  const numPaddedDims = Math.floor(pad.length / 2)
+  const numPaddedDims = pad ? Math.floor(pad.length / 2) : 0
   const dimSteps = []
   for (let i = 0; i < numPaddedDims; i++) {
     const dimIndex = inputShape.length - 1 - i
-    const before = pad[i * 2]
-    const after = pad[i * 2 + 1]
+    const before = pad?.[i * 2] ?? 0
+    const after = pad?.[i * 2 + 1] ?? 0
     dimSteps.push({
       label: `Dimension ${dimIndex}`,
       from: inputShape[dimIndex],
@@ -2409,31 +2452,41 @@ function explainPad(node: TraceNodeForExplanation): Explanation | null {
   }
   dimSteps.reverse()
 
-  const modePart = code(`mode=${mode}`)
-  const valuePart = code(`value=${String(fillValue)}`)
+  const modePart = code(`mode=${mode ?? 'unknown'}`)
+  const valuePart = code(`value=${String(fillValue ?? 'unknown')}`)
 
   const noPadDescription =
     mode === 'constant'
       ? rich(code('pad'), ' was called with an empty pad list, so the shape is unchanged. ', modePart, ' and ', valuePart, ' are present, but no dimensions are padded.')
-      : rich(code('pad'), ' was called with an empty pad list, so the shape is unchanged. ', modePart, ' is present, but no dimensions are padded.')
+      : mode
+        ? rich(code('pad'), ' was called with an empty pad list, so the shape is unchanged. ', modePart, ' is present, but no dimensions are padded.')
+        : rich(code('pad'), ' was called with an empty pad list, so the shape is unchanged.')
+
+  const ambiguousDescription = rich(
+    code('pad'),
+    ' changes tensor boundaries, but this trace does not identify normalized pad, mode, and value metadata clearly enough to describe the exact padding arguments.',
+  )
 
   return {
     title: 'pad',
-    short: rich(`Pads ${shapeText(inputShape)} to ${shapeText(outputShape)} using `, modePart),
+    short: mode
+      ? rich(`Pads ${shapeText(inputShape)} to ${shapeText(outputShape)} using `, modePart)
+      : rich(`Pads ${shapeText(inputShape)} to ${shapeText(outputShape)}`),
     description:
-      numPaddedDims > 0
+      !pad
+        ? ambiguousDescription
+        : numPaddedDims > 0
         ? rich(
             code('pad'),
             ` adds values around the edges of the last ${numPaddedDims} dimension${numPaddedDims === 1 ? '' : 's'}. `,
-            modePart,
-            mode === 'constant' ? ' fills with ' : ` fills using ${mode} values from the existing tensor.`,
-            ...(mode === 'constant' ? [valuePart, '.'] : []),
+            ...(mode ? [modePart, mode === 'constant' ? ' fills with ' : ` fills using ${mode} values from the existing tensor.`] : ['The fill mode is not recorded.']),
+            ...(mode === 'constant' && fillValue !== undefined ? [valuePart, '.'] : []),
             ' Dimensions not covered by the pad list are left unchanged.',
           )
         : noPadDescription,
     formula: {
       display: 'out = F.pad(input, pad, mode, value)',
-      substitution: `pad=(${pad.join(', ')}): ${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
+      substitution: pad ? `pad=(${pad.join(', ')}): ${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}` : undefined,
     },
     shapeSteps: dimSteps.length
       ? dimSteps
@@ -2442,6 +2495,7 @@ function explainPad(node: TraceNodeForExplanation): Explanation | null {
             label: 'Shape',
             from: shapeText(inputShape),
             to: shapeText(outputShape),
+            reason: pad ? undefined : 'Exact pad amounts are not available from normalized metadata.',
           },
         ],
   }
@@ -2461,7 +2515,7 @@ function explainGeneric(node: TraceNodeForExplanation): Explanation | null {
     short: rich("Unknown operation"),
     description: rich(
       code(node.label),
-      ' transforms the tensor according to the traced pytorch metadata.',
+      ' transforms the tensor according to the traced pytorch metadata',
     ),
     formula: node.formula
       ? {
@@ -2494,26 +2548,58 @@ const learnedLayerExplanations: ExplanationMatcher[] = [
 ]
 
 const convolutionExplanations: ExplanationMatcher[] = [
-  // Add Conv1d and Conv3d here when those descriptions are ready.
+  { labels: ['Conv1d'], explain: explainConv1d },
   { labels: ['Conv2d'], explain: explainConv2d },
+  { labels: ['Conv3d'], explain: explainConv3d },
 ]
 
 const poolingExplanations: ExplanationMatcher[] = [
+  { labels: ['MaxPool1d'], explain: explainMaxPool1d },
   { labels: ['MaxPool2d'], explain: explainMaxPool2d },
+  { labels: ['MaxPool3d'], explain: explainMaxPool3d },
+  { labels: ['AvgPool1d'], explain: explainAvgPool1d },
+  { labels: ['AvgPool2d'], explain: explainAvgPool2d },
+  { labels: ['AvgPool3d'], explain: explainAvgPool3d },
+  { labels: ['AdaptiveAvgPool1d'], explain: explainAdaptiveAvgPool1d },
+  { labels: ['AdaptiveAvgPool2d'], explain: explainAdaptiveAvgPool2d },
+  { labels: ['AdaptiveAvgPool3d'], explain: explainAdaptiveAvgPool3d },
 ]
 
 const normalizationExplanations: ExplanationMatcher[] = [
-  { labels: ['LayerNorm'], explain: explainLayerNorm },
+  { labels: ['BatchNorm1d'], explain: explainBatchNorm1d },
   { labels: ['BatchNorm2d'], explain: explainBatchNorm2d },
+  { labels: ['BatchNorm3d'], explain: explainBatchNorm3d },
+  { labels: ['LayerNorm'], explain: explainLayerNorm },
+  { labels: ['RMSNorm'], explain: explainRMSNorm },
+  { labels: ['GroupNorm'], explain: explainGroupNorm },
+  { labels: ['InstanceNorm1d'], explain: explainInstanceNorm1d },
+  { labels: ['InstanceNorm2d'], explain: explainInstanceNorm2d },
+  { labels: ['InstanceNorm3d'], explain: explainInstanceNorm3d },
 ]
 
 const activationExplanations: ExplanationMatcher[] = [
   { labels: ['ReLU', 'relu'], explain: explainReLU },
+  { labels: ['LeakyReLU', 'leaky_relu'], explain: explainLeakyReLU },
+  { labels: ['ELU', 'elu'], explain: explainELU },
+  { labels: ['SELU', 'selu'], explain: explainSELU },
+  { labels: ['Sigmoid', 'sigmoid'], explain: explainSigmoid },
+  { labels: ['Hardsigmoid', 'hardsigmoid'], explain: explainHardsigmoid },
+  { labels: ['Tanh', 'tanh'], explain: explainTanh },
+  { labels: ['SiLU', 'silu'], explain: explainSiLU },
+  { labels: ['Mish', 'mish'], explain: explainMish },
+  { labels: ['Hardswish', 'hardswish'], explain: explainHardswish },
+  { labels: ['Softmax', 'softmax'], explain: explainSoftmax },
+  { labels: ['LogSoftmax', 'log_softmax'], explain: explainLogSoftmax },
   { labels: ['GELU', 'gelu'], explain: explainGELU },
+  { labels: ['Softplus', 'softplus'], explain: explainSoftplus },
 ]
 
 const regularizationExplanations: ExplanationMatcher[] = [
   { labels: ['Dropout', 'dropout'], explain: explainDropout },
+  { labels: ['Dropout1d'], explain: explainDropout1d },
+  { labels: ['Dropout2d'], explain: explainDropout2d },
+  { labels: ['Dropout3d'], explain: explainDropout3d },
+  { labels: ['AlphaDropout'], explain: explainAlphaDropout },
 ]
 
 const shapeTransformExplanations: ExplanationMatcher[] = [
@@ -2521,6 +2607,18 @@ const shapeTransformExplanations: ExplanationMatcher[] = [
   { labels: ['reshape'], explain: explainReshape },
   { labels: ['view'], explain: explainView },
   { labels: ['permute'], explain: explainPermute },
+  { labels: ['transpose'], explain: explainTranspose },
+  { labels: ['unsqueeze'], explain: explainUnsqueeze },
+  { labels: ['expand'], explain: explainExpand },
+  { labels: ['contiguous'], explain: explainContiguous },
+  { labels: ['chunk'], explain: explainChunk },
+  { labels: ['split'], explain: explainSplit },
+  { labels: ['stack'], explain: explainStack },
+  { labels: ['unbind'], explain: explainUnbind },
+  { labels: ['repeat'], explain: explainRepeat },
+  { labels: ['narrow'], explain: explainNarrow },
+  { labels: ['roll'], explain: explainRoll },
+  { labels: ['flip'], explain: explainFlip },
 ]
 
 const tensorOperationExplanations: ExplanationMatcher[] = [
