@@ -291,43 +291,6 @@ select:focus-visible {
   border-color: var(--node-output-border);
 }
 
-.node-badge {
-  position: absolute;
-  top: -10px;
-  right: 12px;
-  min-width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--badge-border);
-  border-radius: 999px;
-  color: var(--badge-text);
-  background: var(--badge);
-  box-shadow: 0 0 18px var(--accent-glow);
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.node-badge--shared {
-  right: 44px;
-  color: var(--accent-hot);
-  border-color: var(--accent-hot);
-  background: var(--badge-hot);
-}
-
-.node-badge--module {
-  color: var(--badge-module);
-}
-
-.node-badge--function {
-  color: var(--badge-function);
-}
-
-.node-badge--method {
-  color: var(--badge-method);
-}
-
 .graph-node:hover,
 .graph-node:focus-visible {
   z-index: 100;

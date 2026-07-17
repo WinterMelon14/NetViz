@@ -18,13 +18,3 @@ export function totalParamLabel(node: TraceNode) {
   return node.params?.memory?.human ?? 'no params'
 }
 
-export function kindBadge(node: TraceNode) {
-  const labelByKind: Record<string, string> = {
-    input: 'I',
-    module: 'M',
-    function: 'F',
-    method: 'T',
-  }
-
-  return labelByKind[node.kind] ?? node.kind.slice(0, 1).toUpperCase()
-}

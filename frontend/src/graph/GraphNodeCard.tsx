@@ -5,7 +5,7 @@ import { ShapeFlow } from '../components/ShapeFlow'
 import { ShapePill } from '../components/ShapePill'
 import { explainNode } from '../explanations'
 import { primaryInput, primaryOutput } from '../trace/selectors'
-import { kindBadge, nodeCardWidth, totalParamLabel } from './nodePresentation'
+import { nodeCardWidth, totalParamLabel } from './nodePresentation'
 import { nodeDiagnostics } from './nodeDiagnostics'
 import type { PositionedTraceNode } from './types'
 
@@ -43,8 +43,6 @@ export function GraphNodeCard({
       onPointerCancel={onPointerUp}
       onClick={() => onSelectNode(node.id)}
     >
-      {node.kind !== 'input' ? <span className={`node-badge node-badge--${node.kind}`}>{kindBadge(node)}</span> : null}
-      {node.module?.is_reused ? <span className="node-badge node-badge--shared">S</span> : null}
       <span className="node-title">
         {node.label}
         {explanation ? (
