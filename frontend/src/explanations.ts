@@ -113,6 +113,56 @@ function numberTriple(value: unknown, defaults: [number, number, number]): [numb
   return defaults
 }
 
+function stringAttr(value: unknown) {
+  return typeof value === 'string' ? value.toLowerCase() : null
+}
+
+function numericPaddingPair(value: unknown, fallback: [number, number]) {
+  const paddingMode = stringAttr(value)
+  if (paddingMode === 'valid') return [0, 0] as const
+  if (paddingMode) return null
+  return numberPair(value, fallback)
+}
+
+function numericPaddingTriple(value: unknown, fallback: [number, number, number]) {
+  const paddingMode = stringAttr(value)
+  if (paddingMode === 'valid') return [0, 0, 0] as const
+  if (paddingMode) return null
+  return numberTriple(value, fallback)
+}
+
+function ceilModePoolFormula(baseNumerator: string) {
+  return `out = ceil((${baseNumerator}) / s) + 1, then drop windows starting in right padding`
+}
+
+function floorModePoolFormula(baseNumerator: string) {
+  return `out = floor((${baseNumerator}) / s) + 1`
+}
+
+function affineSuffix(node: TraceNodeForExplanation, granularity: string, defaultAffine = true): Array<string | TextPart> {
+  const affine = node.attrs?.affine
+  const elementwiseAffine = node.attrs?.elementwise_affine
+  const hasAffine = affine !== undefined ? affine !== false : elementwiseAffine !== undefined ? elementwiseAffine !== false : defaultAffine
+  if (!hasAffine) return ['. No learned affine scale or bias is applied.']
+
+  const hasWeight = node.attrs?.weight !== false
+  const hasBias = node.attrs?.bias !== false
+  if (hasWeight && hasBias) return [', then applies learned ', granularity, ' ', code('weight'), ' and ', code('bias'), '.']
+  if (hasWeight) return [', then applies learned ', granularity, ' ', code('weight'), '.']
+  if (hasBias) return [', then applies learned ', granularity, ' ', code('bias'), '.']
+  return ['. No learned affine scale or bias is applied.']
+}
+
+function affineFormula(base: string, node: TraceNodeForExplanation, defaultAffine = true) {
+  const affine = node.attrs?.affine
+  const elementwiseAffine = node.attrs?.elementwise_affine
+  const hasAffine = affine !== undefined ? affine !== false : elementwiseAffine !== undefined ? elementwiseAffine !== false : defaultAffine
+  if (!hasAffine || (node.attrs?.weight === false && node.attrs?.bias === false)) return base
+  if (node.attrs?.bias === false) return `${base} * weight`
+  if (node.attrs?.weight === false) return `${base} + bias`
+  return `${base} * weight + bias`
+}
+
 // ============================================================================
 // Learned Dense And Lookup Layers
 // ============================================================================
@@ -223,7 +273,9 @@ function explainConv1d(node: TraceNodeForExplanation): Explanation | null {
   const [n2, c2, lOut] = outputShape
   const [k] = numberPair(node.attrs?.kernel_size, [0, 0])
   const [s] = numberPair(node.attrs?.stride, [1, 1])
-  const [p] = numberPair(node.attrs?.padding, [0, 0])
+  const paddingMode = stringAttr(node.attrs?.padding)
+  const paddingPair = numericPaddingPair(node.attrs?.padding, [0, 0])
+  const [p] = paddingPair ?? [0, 0]
   const [d] = numberPair(node.attrs?.dilation, [1, 1])
 
   return {
@@ -255,7 +307,9 @@ function explainConv1d(node: TraceNodeForExplanation): Explanation | null {
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: `Filters map input channels to out_channels=${c2}.` },
-      { label: 'Length', from: l, to: lOut, substitution: `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}` },
+      paddingPair
+        ? { label: 'Length', from: l, to: lOut, substitution: `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}` }
+        : { label: 'Length', from: l, to: lOut, reason: `String padding "${paddingMode}" determines the output length; numeric padding substitution is omitted.` },
     ],
   }
 }
@@ -270,7 +324,9 @@ function explainConv2d(node: TraceNodeForExplanation): Explanation | null {
   const [n2, c2, hOut, wOut] = outputShape
   const [kh, kw] = numberPair(node.attrs?.kernel_size, [0, 0])
   const [sh, sw] = numberPair(node.attrs?.stride, [1, 1])
-  const [ph, pw] = numberPair(node.attrs?.padding, [0, 0])
+  const paddingMode = stringAttr(node.attrs?.padding)
+  const paddingPair = numericPaddingPair(node.attrs?.padding, [0, 0])
+  const [ph, pw] = paddingPair ?? [0, 0]
   const [dh, dw] = numberPair(node.attrs?.dilation, [1, 1])
 
   return {
@@ -301,8 +357,12 @@ function explainConv2d(node: TraceNodeForExplanation): Explanation | null {
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: `Filters map input channels to out_channels=${c2}.` },
-      { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` },
-      { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` },
+      paddingPair
+        ? { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` }
+        : { label: 'Height', from: h, to: hOut, reason: `String padding "${paddingMode}" determines the output height; numeric padding substitution is omitted.` },
+      paddingPair
+        ? { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` }
+        : { label: 'Width', from: w, to: wOut, reason: `String padding "${paddingMode}" determines the output width; numeric padding substitution is omitted.` },
     ],
   }
 }
@@ -316,7 +376,9 @@ function explainConv3d(node: TraceNodeForExplanation): Explanation | null {
   const [n2, c2, dOut, hOut, wOut] = outputShape
   const [kd, kh, kw] = numberTriple(node.attrs?.kernel_size, [0, 0, 0])
   const [sd, sh, sw] = numberTriple(node.attrs?.stride, [1, 1, 1])
-  const [pd, ph, pw] = numberTriple(node.attrs?.padding, [0, 0, 0])
+  const paddingMode = stringAttr(node.attrs?.padding)
+  const paddingTriple = numericPaddingTriple(node.attrs?.padding, [0, 0, 0])
+  const [pd, ph, pw] = paddingTriple ?? [0, 0, 0]
   const [dd, dh, dw] = numberTriple(node.attrs?.dilation, [1, 1, 1])
 
   return {
@@ -348,9 +410,15 @@ function explainConv3d(node: TraceNodeForExplanation): Explanation | null {
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: `Filters map input channels to out_channels=${c2}.` },
-      { label: 'Depth', from: d, to: dOut, substitution: `floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}` },
-      { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` },
-      { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` },
+      paddingTriple
+        ? { label: 'Depth', from: d, to: dOut, substitution: `floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}` }
+        : { label: 'Depth', from: d, to: dOut, reason: `String padding "${paddingMode}" determines the output depth; numeric padding substitution is omitted.` },
+      paddingTriple
+        ? { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}` }
+        : { label: 'Height', from: h, to: hOut, reason: `String padding "${paddingMode}" determines the output height; numeric padding substitution is omitted.` },
+      paddingTriple
+        ? { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${dw}*(${kw} - 1) - 1) / ${sw}) + 1 = ${wOut}` }
+        : { label: 'Width', from: w, to: wOut, reason: `String padding "${paddingMode}" determines the output width; numeric padding substitution is omitted.` },
     ],
   }
 }
@@ -390,7 +458,7 @@ function explainMaxPool1d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: ceilMode
-        ? 'out = ceil((in + 2p - d(k - 1) - 1 + (s - 1)) / s) + 1, then drop windows starting in right padding'
+        ? ceilModePoolFormula('in + 2p - d(k - 1) - 1')
         : 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
       substitution: ceilMode ? undefined : `floor((${l} + 2*${p} - ${d}*(${k} - 1) - 1) / ${s}) + 1 = ${lOut}`,
     },
@@ -435,7 +503,7 @@ function explainMaxPool2d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: ceilMode
-        ? 'out = ceil((in + 2p - d(k - 1) - 1 + (s - 1)) / s) + 1, then drop windows starting in right padding'
+        ? ceilModePoolFormula('in + 2p - d(k - 1) - 1')
         : 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
       substitution: ceilMode ? undefined : `H: floor((${h} + 2*${ph} - ${dh}*(${kh} - 1) - 1) / ${sh}) + 1 = ${hOut}`,
     },
@@ -481,7 +549,7 @@ function explainMaxPool3d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: ceilMode
-        ? 'out = ceil((in + 2p - d(k - 1) - 1 + (s - 1)) / s) + 1, then drop windows starting in right padding'
+        ? ceilModePoolFormula('in + 2p - d(k - 1) - 1')
         : 'out = floor((in + 2p - d(k - 1) - 1) / s) + 1',
       substitution: ceilMode ? undefined : `D: floor((${d} + 2*${pd} - ${dd}*(${kd} - 1) - 1) / ${sd}) + 1 = ${dOut}`,
     },
@@ -512,6 +580,7 @@ function explainAvgPool1d(node: TraceNodeForExplanation): Explanation | null {
   const [s] = numberPair(node.attrs?.stride, [k, k])
   const [p] = numberPair(node.attrs?.padding, [0, 0])
   const countIncludePad = node.attrs?.count_include_pad ?? true
+  const ceilMode = node.attrs?.ceil_mode === true
 
   return {
     title: 'AvgPool1d',
@@ -531,13 +600,15 @@ function explainAvgPool1d(node: TraceNodeForExplanation): Explanation | null {
       ...(!countIncludePad ? [' Padded positions are ', code('excluded'), ' from the average.'] : []),
     ),
     formula: {
-      display: 'out = floor((in + 2p - k) / s) + 1',
-      substitution: `floor((${l} + 2*${p} - ${k}) / ${s}) + 1 = ${lOut}`,
+      display: ceilMode ? ceilModePoolFormula('in + 2p - k') : floorModePoolFormula('in + 2p - k'),
+      substitution: ceilMode ? undefined : `floor((${l} + 2*${p} - ${k}) / ${s}) + 1 = ${lOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Length', from: l, to: lOut, substitution: `floor((${l} + 2*${p} - ${k}) / ${s}) + 1 = ${lOut}` },
+      ceilMode
+        ? { label: 'Length', from: l, to: lOut, reason: 'Ceil mode may include one extra averaging window, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Length', from: l, to: lOut, substitution: `floor((${l} + 2*${p} - ${k}) / ${s}) + 1 = ${lOut}` },
     ],
   }
 }
@@ -553,6 +624,7 @@ function explainAvgPool2d(node: TraceNodeForExplanation): Explanation | null {
   const [sh, sw] = numberPair(node.attrs?.stride, [kh, kw])
   const [ph, pw] = numberPair(node.attrs?.padding, [0, 0])
   const countIncludePad = node.attrs?.count_include_pad ?? true
+  const ceilMode = node.attrs?.ceil_mode === true
 
   return {
     title: 'AvgPool2d',
@@ -572,14 +644,18 @@ function explainAvgPool2d(node: TraceNodeForExplanation): Explanation | null {
       ...(!countIncludePad ? [' Padded positions are ', code('excluded'), ' from the average.'] : []),
     ),
     formula: {
-      display: 'out = floor((in + 2p - k) / s) + 1',
-      substitution: `H: floor((${h} + 2*${ph} - ${kh}) / ${sh}) + 1 = ${hOut}`,
+      display: ceilMode ? ceilModePoolFormula('in + 2p - k') : floorModePoolFormula('in + 2p - k'),
+      substitution: ceilMode ? undefined : `H: floor((${h} + 2*${ph} - ${kh}) / ${sh}) + 1 = ${hOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${kh}) / ${sh}) + 1 = ${hOut}` },
-      { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${kw}) / ${sw}) + 1 = ${wOut}` },
+      ceilMode
+        ? { label: 'Height', from: h, to: hOut, reason: 'Ceil mode may include one extra averaging window, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${kh}) / ${sh}) + 1 = ${hOut}` },
+      ceilMode
+        ? { label: 'Width', from: w, to: wOut, reason: 'Ceil mode may include one extra averaging window, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${kw}) / ${sw}) + 1 = ${wOut}` },
     ],
   }
 }
@@ -595,6 +671,7 @@ function explainAvgPool3d(node: TraceNodeForExplanation): Explanation | null {
   const [sd, sh, sw] = numberTriple(node.attrs?.stride, [kd, kh, kw])
   const [pd, ph, pw] = numberTriple(node.attrs?.padding, [0, 0, 0])
   const countIncludePad = node.attrs?.count_include_pad ?? true
+  const ceilMode = node.attrs?.ceil_mode === true
 
   return {
     title: 'AvgPool3d',
@@ -612,15 +689,21 @@ function explainAvgPool3d(node: TraceNodeForExplanation): Explanation | null {
       ...(!countIncludePad ? [' Padded positions are ', code('excluded'), ' from the average.'] : []),
     ),
     formula: {
-      display: 'out = floor((in + 2p - k) / s) + 1',
-      substitution: `D: floor((${d} + 2*${pd} - ${kd}) / ${sd}) + 1 = ${dOut}`,
+      display: ceilMode ? ceilModePoolFormula('in + 2p - k') : floorModePoolFormula('in + 2p - k'),
+      substitution: ceilMode ? undefined : `D: floor((${d} + 2*${pd} - ${kd}) / ${sd}) + 1 = ${dOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Depth', from: d, to: dOut, substitution: `floor((${d} + 2*${pd} - ${kd}) / ${sd}) + 1 = ${dOut}` },
-      { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${kh}) / ${sh}) + 1 = ${hOut}` },
-      { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${kw}) / ${sw}) + 1 = ${wOut}` },
+      ceilMode
+        ? { label: 'Depth', from: d, to: dOut, reason: 'Ceil mode may include one extra averaging window, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Depth', from: d, to: dOut, substitution: `floor((${d} + 2*${pd} - ${kd}) / ${sd}) + 1 = ${dOut}` },
+      ceilMode
+        ? { label: 'Height', from: h, to: hOut, reason: 'Ceil mode may include one extra averaging window, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Height', from: h, to: hOut, substitution: `floor((${h} + 2*${ph} - ${kh}) / ${sh}) + 1 = ${hOut}` },
+      ceilMode
+        ? { label: 'Width', from: w, to: wOut, reason: 'Ceil mode may include one extra averaging window, then PyTorch drops windows that would start in right-side padding.' }
+        : { label: 'Width', from: w, to: wOut, substitution: `floor((${w} + 2*${pw} - ${kw}) / ${sw}) + 1 = ${wOut}` },
     ],
   }
 }
@@ -643,18 +726,18 @@ function explainAdaptiveAvgPool1d(node: TraceNodeForExplanation): Explanation | 
     ),
     description: rich(
       code('AdaptiveAvgPool1d'),
-      ' averages each pooling region to hit a target output length of ',
+      ' averages a selected input region for each output position to hit a target output length of ',
       code(`${lOut}`),
       '. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'output bins partition the input dimension into regions that average to the requested output size',
+      display: 'each output position averages a selected input region; region sizes and boundaries may vary and can overlap',
       substitution: `L: ${l} ⟶ ${lOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Length', from: l, to: lOut, reason: `Output length is fixed at ${lOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
+      { label: 'Length', from: l, to: lOut, reason: `Output length is fixed at ${lOut}; region sizes and boundaries may vary and can overlap when sizes do not divide evenly.` },
     ],
   }
 }
@@ -677,19 +760,19 @@ function explainAdaptiveAvgPool2d(node: TraceNodeForExplanation): Explanation | 
     ),
     description: rich(
       code('AdaptiveAvgPool2d'),
-      ' averages each pooling region to hit a target output size of ',
+      ' averages a selected input region for each output position to hit a target output size of ',
       code(`${hOut}x${wOut}`),
       '. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'output bins partition each input dimension into regions that average to the requested output size',
+      display: 'each output position averages a selected input region; region sizes and boundaries may vary and can overlap',
       substitution: `H: ${h} ⟶ ${hOut}, W: ${w} ⟶ ${wOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
-      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
+      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; region sizes and boundaries may vary and can overlap when sizes do not divide evenly.` },
+      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; region sizes and boundaries may vary and can overlap when sizes do not divide evenly.` },
     ],
   }
 }
@@ -712,20 +795,20 @@ function explainAdaptiveAvgPool3d(node: TraceNodeForExplanation): Explanation | 
     ),
     description: rich(
       code('AdaptiveAvgPool3d'),
-      ' averages each pooling region to hit a target output size of ',
+      ' averages a selected input region for each output position to hit a target output size of ',
       code(`${dOut}x${hOut}x${wOut}`),
       '. Batch and channel dimensions are preserved.',
     ),
     formula: {
-      display: 'output bins partition each input dimension into regions that average to the requested output size',
+      display: 'each output position averages a selected input region; region sizes and boundaries may vary and can overlap',
       substitution: `D: ${d} ⟶ ${dOut}, H: ${h} ⟶ ${hOut}, W: ${w} ⟶ ${wOut}`,
     },
     shapeSteps: [
       { label: 'Batch', from: n, to: n2, reason: 'Batch dimension is preserved.' },
       { label: 'Channels', from: c, to: c2, reason: 'Pooling operates independently per channel.' },
-      { label: 'Depth', from: d, to: dOut, reason: `Output depth is fixed at ${dOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
-      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
-      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; pooling region boundaries may vary when sizes do not divide evenly.` },
+      { label: 'Depth', from: d, to: dOut, reason: `Output depth is fixed at ${dOut}; region sizes and boundaries may vary and can overlap when sizes do not divide evenly.` },
+      { label: 'Height', from: h, to: hOut, reason: `Output height is fixed at ${hOut}; region sizes and boundaries may vary and can overlap when sizes do not divide evenly.` },
+      { label: 'Width', from: w, to: wOut, reason: `Output width is fixed at ${wOut}; region sizes and boundaries may vary and can overlap when sizes do not divide evenly.` },
     ],
   }
 }
@@ -734,17 +817,30 @@ function explainAdaptiveAvgPool3d(node: TraceNodeForExplanation): Explanation | 
 // ============================================================================
 
 function batchNormStatSource(node: TraceNodeForExplanation): Array<string | TextPart> {
+  if (batchNormUsesCurrentBatchStats(node)) return ['statistics computed from the current batch']
+  if (batchNormHasRunningStats(node)) return ['stored running statistics from training']
+  return ['stored running statistics when available; otherwise current-batch statistics']
+}
+
+function batchNormUsesCurrentBatchStats(node: TraceNodeForExplanation) {
   const training = node.attrs?.training === true
   const trackRunningStats = node.attrs?.track_running_stats !== false
+  return training || !trackRunningStats
+}
+
+function batchNormHasRunningStats(node: TraceNodeForExplanation) {
   const hasRunningStats =
     node.inputs.some((input) => input.role === 'running_mean' || input.role === 'running_var')
     || node.attrs?.running_mean !== undefined
     || node.attrs?.running_var !== undefined
     || node.attrs?.track_running_stats === true
+  return hasRunningStats
+}
 
-  if (training || !trackRunningStats) return ['statistics computed from the current batch']
-  if (hasRunningStats) return ['stored running statistics from training']
-  return ['stored running statistics when available; otherwise current-batch statistics']
+function batchNormStatSubstitution(node: TraceNodeForExplanation, currentBatchText: string) {
+  if (batchNormUsesCurrentBatchStats(node)) return currentBatchText
+  if (batchNormHasRunningStats(node)) return 'stored statistics applied independently to each channel'
+  return 'stored statistics applied when available; otherwise current-batch statistics are used'
 }
 
 function batchNormAffineDescription(node: TraceNodeForExplanation): Array<string | TextPart> {
@@ -798,9 +894,12 @@ function explainBatchNorm1d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: batchNormFormula(node),
-      substitution: l !== undefined
-        ? `stats computed per-channel over N=${n}, L=${l}`
-        : `stats computed per-feature over N=${n}`,
+      substitution: batchNormStatSubstitution(
+        node,
+        l !== undefined
+          ? `statistics computed per-channel over current N=${n}, L=${l}`
+          : `statistics computed per-feature over current N=${n}`,
+      ),
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -832,7 +931,7 @@ function explainBatchNorm2d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: batchNormFormula(node),
-      substitution: `stats computed per-channel over N=${n}, H=${h}, W=${w}`,
+      substitution: batchNormStatSubstitution(node, `statistics computed per-channel over current N=${n}, H=${h}, W=${w}`),
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -864,7 +963,7 @@ function explainBatchNorm3d(node: TraceNodeForExplanation): Explanation | null {
     ),
     formula: {
       display: batchNormFormula(node),
-      substitution: `stats computed per-channel over N=${n}, D=${d}, H=${h}, W=${w}`,
+      substitution: batchNormStatSubstitution(node, `statistics computed per-channel over current N=${n}, D=${d}, H=${h}, W=${w}`),
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -880,6 +979,7 @@ function explainLayerNorm(node: TraceNodeForExplanation): Explanation | null {
   const rawNormalizedShape = node.attrs?.normalized_shape
   const normDims = Array.isArray(rawNormalizedShape) ? rawNormalizedShape.map(Number) : inputShape.slice(-1)
   const eps = Number(node.attrs?.eps ?? 1e-5)
+  const affineDescription = affineSuffix(node, 'per-element')
 
   return {
     title: 'LayerNorm',
@@ -890,14 +990,12 @@ function explainLayerNorm(node: TraceNodeForExplanation): Explanation | null {
       code(shapeText(normDims)),
       ' by subtracting the mean and dividing by the standard deviation (',
       code(`eps=${eps}`),
-      '). It then applies a learned per-element ',
-      code('weight'),
-      ' and ',
-      code('bias'),
-      '. Other dimensions are normalized independently.',
+      ')',
+      ...affineDescription,
+      ' Other dimensions are normalized independently.',
     ),
     formula: {
-      display: 'out = (x - mean) / sqrt(var + eps) * weight + bias',
+      display: affineFormula('out = (x - mean) / sqrt(var + eps)', node),
       substitution: `mean/var computed over the last ${normDims.length} dim(s): ${shapeText(normDims)}`,
     },
     shapeSteps: [
@@ -912,6 +1010,7 @@ function explainRMSNorm(node: TraceNodeForExplanation): Explanation | null {
   if (!inputShape || !outputShape) return null
 
   const eps = Number(node.attrs?.eps ?? 1e-8)
+  const affineDescription = affineSuffix(node, 'per-element')
 
   return {
     title: 'RMSNorm',
@@ -920,14 +1019,14 @@ function explainRMSNorm(node: TraceNodeForExplanation): Explanation | null {
       code('RMSNorm'),
       ' divides each value by the root mean square of the elements along the normalized dimension (',
       code(`eps=${eps}`),
-      '), then applies a learned per-element ',
-      code('weight'),
-      '. It skips the mean subtraction step of ',
+      ')',
+      ...affineDescription,
+      ' It skips the mean subtraction step of ',
       code('LayerNorm'),
       ', so it can be cheaper and has been used successfully in LLaMA, Mistral, and other modern LLMs.',
     ),
     formula: {
-      display: 'out = x / sqrt(mean(x^2) + eps) * weight',
+      display: affineFormula('out = x / sqrt(mean(x^2) + eps)', node),
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -943,6 +1042,7 @@ function explainGroupNorm(node: TraceNodeForExplanation): Explanation | null {
   const [, c] = inputShape
   const numGroups = Number(node.attrs?.num_groups ?? 1)
   const chansPerGroup = c / numGroups
+  const affineDescription = affineSuffix(node, 'per-channel')
 
   return {
     title: 'GroupNorm',
@@ -960,9 +1060,10 @@ function explainGroupNorm(node: TraceNodeForExplanation): Explanation | null {
       ' channels each, then normalizes within each group across channels and spatial dims. Unlike ',
       code('BatchNorm'),
       ', it does not depend on batch size, making it suitable for small batches and recurrent models.',
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - mean) / sqrt(var + eps) * weight + bias',
+      display: affineFormula('out = (x - mean) / sqrt(var + eps)', node),
       substitution: `mean/var computed per group (${chansPerGroup} channels/group) per sample`,
     },
     shapeSteps: [
@@ -978,6 +1079,7 @@ function explainInstanceNorm1d(node: TraceNodeForExplanation): Explanation | nul
 
   const [, c, l] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
+  const affineDescription = affineSuffix(node, 'per-channel', false)
 
   return {
     title: 'InstanceNorm1d',
@@ -991,9 +1093,10 @@ function explainInstanceNorm1d(node: TraceNodeForExplanation): Explanation | nul
       '). Unlike ',
       code('BatchNorm'),
       ', statistics are computed per sample rather than across the batch, so batch size has no effect.',
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - mean) / sqrt(var + eps) * weight + bias',
+      display: affineFormula('out = (x - mean) / sqrt(var + eps)', node, false),
       substitution: `mean/var computed per channel per sample over L=${l}`,
     },
     shapeSteps: [
@@ -1009,6 +1112,7 @@ function explainInstanceNorm2d(node: TraceNodeForExplanation): Explanation | nul
 
   const [, c, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
+  const affineDescription = affineSuffix(node, 'per-channel', false)
 
   return {
     title: 'InstanceNorm2d',
@@ -1020,9 +1124,10 @@ function explainInstanceNorm2d(node: TraceNodeForExplanation): Explanation | nul
       ', ',
       code(`eps=${eps}`),
       '). Widely used in style transfer where per-sample, per-channel statistics carry style information.',
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - mean) / sqrt(var + eps) * weight + bias',
+      display: affineFormula('out = (x - mean) / sqrt(var + eps)', node, false),
       substitution: `mean/var computed per channel per sample over H=${h}, W=${w}`,
     },
     shapeSteps: [
@@ -1038,6 +1143,7 @@ function explainInstanceNorm3d(node: TraceNodeForExplanation): Explanation | nul
 
   const [, c, d, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
+  const affineDescription = affineSuffix(node, 'per-channel', false)
 
   return {
     title: 'InstanceNorm3d',
@@ -1051,9 +1157,10 @@ function explainInstanceNorm3d(node: TraceNodeForExplanation): Explanation | nul
       '). The 3D counterpart to ',
       code('InstanceNorm2d'),
       ', used in volumetric medical imaging and video models.',
+      ...affineDescription,
     ),
     formula: {
-      display: 'out = (x - mean) / sqrt(var + eps) * weight + bias',
+      display: affineFormula('out = (x - mean) / sqrt(var + eps)', node, false),
       substitution: `mean/var computed per channel per sample over D=${d}, H=${h}, W=${w}`,
     },
     shapeSteps: [
@@ -1394,7 +1501,7 @@ function explainSoftplus(node: TraceNodeForExplanation): Explanation | null {
 
   return {
     title: 'Softplus',
-    short: rich('Smooth approximation of ', code('ReLU'), ': non-negative for finite inputs'),
+    short: rich('Smooth approximation of ', code('ReLU'), ': mathematically positive; may underflow to zero numerically'),
     description: rich(
       code('Softplus'),
       ' computes ',
@@ -1877,7 +1984,7 @@ function explainUnsqueeze(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const dim = normalizeDim(Number(node.attrs?.dim ?? 0), inputShape.length)
+  const dim = normalizeInsertionDim(Number(node.attrs?.dim ?? 0), inputShape.length + 1)
 
   return {
     title: 'unsqueeze',
@@ -2133,7 +2240,7 @@ function explainUnbind(node: TraceNodeForExplanation): Explanation | null {
   const outputs = tensorValues(node.outputs)
   if (!inputShape || !outputs.length) return null
 
-  const dim = Number(node.attrs?.dim ?? 0)
+  const dim = normalizeDim(Number(node.attrs?.dim ?? 0), inputShape.length)
   const dimSize = inputShape[dim]
 
   return {
@@ -2238,7 +2345,7 @@ function explainNarrow(node: TraceNodeForExplanation): Explanation | null {
     ),
     description: rich(
       code('narrow'),
-      ' returns a contiguous slice of the tensor along a single dimension. It is equivalent to slicing one dimension with a bounded range and preserves rank, so the sliced dimension shrinks rather than disappearing.',
+      ' returns a view over a consecutive range along one dimension. It is equivalent to slicing one dimension with a bounded range and preserves rank, so the sliced dimension shrinks rather than disappearing.',
     ),
     formula: {
       display: `out = narrow(input, dim=${dim}, start=${start}, length=${length})`,
