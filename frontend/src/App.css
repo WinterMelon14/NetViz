@@ -940,17 +940,6 @@ code {
   backdrop-filter: blur(10px);
 }
 
-.load-modal {
-  width: min(760px, 100%);
-  display: grid;
-  gap: 14px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-glass);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46), 0 0 34px var(--accent-glow);
-}
-
 .source-modal {
   width: min(920px, 100%);
   max-height: min(860px, calc(100svh - 48px));
@@ -1525,8 +1514,6 @@ code {
   margin-left: auto;
 }
 
-.load-modal header,
-.load-modal footer,
 .source-modal header,
 .source-modal footer {
   display: flex;
@@ -1535,12 +1522,10 @@ code {
   gap: 12px;
 }
 
-.load-modal h2,
 .source-modal h2 {
   margin-top: 2px;
 }
 
-.load-modal textarea,
 .source-modal textarea {
   width: 100%;
   resize: vertical;
@@ -1555,22 +1540,13 @@ code {
   outline: none;
 }
 
-.load-modal textarea {
-  min-height: 330px;
-}
-
 .source-modal textarea {
   min-height: 240px;
 }
 
-.load-modal textarea:focus,
 .source-modal textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.load-modal input[type='file'] {
-  display: none;
 }
 
 .icon-button {
@@ -1604,12 +1580,6 @@ code {
 .primary-button {
   border-color: var(--accent);
   background: var(--primary-button);
-}
-
-.load-error {
-  color: var(--danger);
-  font-family: var(--mono);
-  font-size: 12px;
 }
 
 .source-error,

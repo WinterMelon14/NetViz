@@ -11,7 +11,6 @@ import { useGraphViewport } from './graph/useGraphViewport'
 import { useNodeDrag } from './graph/useNodeDrag'
 import { ModelSummary } from './inspector/ModelSummary'
 import { NodeInspector } from './inspector/NodeInspector'
-import { TraceLoadDialog } from './trace/TraceLoadDialog'
 import { useTraceLoader } from './trace/useTraceLoader'
 import { UserTracePanel } from './userTrace/UserTracePanel'
 import type { UserTraceDraft } from './userTrace/UserTracePanel'
@@ -30,16 +29,9 @@ function App() {
   const onTraceApplied = useCallback(() => setSelectedNodeId(null), [])
   const {
     trace,
-    isLoadModalOpen,
-    setIsLoadModalOpen,
-    jsonText,
-    loadError,
     layoutPositions,
     setLayoutPositions,
     loadTracePayload,
-    onJsonTextChange,
-    loadJsonFromFile,
-    loadJsonFromText,
   } = useTraceLoader({ onTraceApplied })
 
   const {
@@ -230,7 +222,6 @@ function App() {
     setIsUserTraceOpen(true)
   }
 
-  const openFixtureLoader = import.meta.env.DEV ? () => setIsLoadModalOpen(true) : undefined
   const recoveryError = layoutError
   const viewState = getTraceViewState({
     hasTrace: Boolean(trace),
@@ -250,17 +241,6 @@ function App() {
       onClose={() => setIsUserTraceOpen(false)}
     />
   )
-  const fixtureDialog = import.meta.env.DEV && isLoadModalOpen ? (
-    <TraceLoadDialog
-      jsonText={jsonText}
-      loadError={loadError}
-      onJsonTextChange={onJsonTextChange}
-      onFileSelected={loadJsonFromFile}
-      onLoadPastedJson={loadJsonFromText}
-      onClose={() => setIsLoadModalOpen(false)}
-    />
-  ) : null
-
   let applicationView
   if (viewState === 'recovery' && recoveryError) {
     applicationView = (
@@ -268,12 +248,11 @@ function App() {
         <TraceRecovery
           message={recoveryError}
           onTraceModel={openUserTrace}
-          onLoadFixture={openFixtureLoader}
         />
       </main>
     )
   } else if (viewState === 'empty') {
-    applicationView = <EmptyTraceState onTraceModel={openUserTrace} onLoadFixture={openFixtureLoader} />
+    applicationView = <EmptyTraceState onTraceModel={openUserTrace} />
   } else if (viewState === 'layout' || !trace || !layout) {
     applicationView = <main className={`app-shell ${theme} app-shell--message`}>Preparing graph...</main>
   } else {
@@ -283,7 +262,6 @@ function App() {
           modelName={trace.model_name}
           onOpenUserTrace={openUserTrace}
           onFitGraph={resetGraphPositions}
-          onLoadFixture={openFixtureLoader}
         />
 
         <GraphPanel
@@ -334,7 +312,6 @@ function App() {
   return (
     <div className={`app-root app-shell ${theme}`}>
       {applicationView}
-      {fixtureDialog}
       {tracePanel}
     </div>
   )

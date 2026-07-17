@@ -2,12 +2,10 @@ export function Topbar({
   modelName,
   onOpenUserTrace,
   onFitGraph,
-  onLoadFixture,
 }: {
   modelName: string
   onOpenUserTrace: () => void
   onFitGraph: () => void
-  onLoadFixture?: () => void
 }) {
   return (
     <header className="topbar">
@@ -16,7 +14,6 @@ export function Topbar({
         <strong>{modelName}</strong>
       </div>
       <div className="toolbar">
-        {onLoadFixture ? <button type="button" onClick={onLoadFixture}>Load Trace Fixture</button> : null}
         <button type="button" onClick={onOpenUserTrace}>Trace Model</button>
         <button type="button" aria-label="Fit graph" title="Fit graph" onClick={onFitGraph}><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 32 32">
   <path d="M0 0h32v32H0z" fill="none" />
