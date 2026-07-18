@@ -3,6 +3,7 @@ import { nodeCardWidth } from './nodePresentation'
 import { buildLayout } from './buildLayout'
 import type { LayoutPositionResult, LayoutResult } from './buildLayout'
 import type { TraceEdge, TraceNode } from '../trace/types'
+import type { GraphSettings } from '../settings/graphSettings'
 
 type WorkerResponse =
   | { requestId: number; ok: true; layout: LayoutPositionResult }
@@ -12,15 +13,15 @@ export class LayoutWorkerClient {
   private worker: Worker | null = null
   private requestId = 0
 
-  layout(nodes: TraceNode[], edges: TraceEdge[]): Promise<LayoutResult> {
+  layout(nodes: TraceNode[], edges: TraceEdge[], settings: GraphSettings): Promise<LayoutResult> {
     this.cancel()
-    if (typeof Worker !== 'function') return buildLayout(nodes, edges)
+    if (typeof Worker !== 'function') return buildLayout(nodes, edges, settings)
     const requestId = ++this.requestId
     let worker: Worker
     try {
       worker = new Worker(new URL('./layoutWorker.ts', import.meta.url), { type: 'module' })
     } catch {
-      return buildLayout(nodes, edges)
+      return buildLayout(nodes, edges, settings)
     }
     this.worker = worker
 
@@ -50,7 +51,7 @@ export class LayoutWorkerClient {
         worker.terminate()
         this.worker = null
         if (event.message.includes('not a constructor')) {
-          buildLayout(nodes, edges).then(resolve, reject)
+          buildLayout(nodes, edges, settings).then(resolve, reject)
           return
         }
         reject(new Error(event.message || 'Graph layout worker failed.'))
@@ -59,6 +60,7 @@ export class LayoutWorkerClient {
         requestId,
         nodes: nodes.map((node) => ({ id: node.id, width: nodeCardWidth(node), height: nodeHeight })),
         edges,
+        settings,
       })
     })
   }

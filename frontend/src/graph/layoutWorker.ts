@@ -3,13 +3,19 @@
 import { buildLayoutPositions } from './buildLayout'
 import type { LayoutNodeInput } from './buildLayout'
 import type { TraceEdge } from '../trace/types'
+import type { GraphSettings } from '../settings/graphSettings'
 
-type LayoutWorkerRequest = { requestId: number; nodes: LayoutNodeInput[]; edges: TraceEdge[] }
+type LayoutWorkerRequest = {
+  requestId: number
+  nodes: LayoutNodeInput[]
+  edges: TraceEdge[]
+  settings: GraphSettings
+}
 
 self.onmessage = async (event: MessageEvent<LayoutWorkerRequest>) => {
-  const { requestId, nodes, edges } = event.data
+  const { requestId, nodes, edges, settings } = event.data
   try {
-    self.postMessage({ requestId, ok: true, layout: await buildLayoutPositions(nodes, edges) })
+    self.postMessage({ requestId, ok: true, layout: await buildLayoutPositions(nodes, edges, settings) })
   } catch (error) {
     self.postMessage({
       requestId,

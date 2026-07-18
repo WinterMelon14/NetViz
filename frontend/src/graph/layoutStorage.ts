@@ -1,4 +1,5 @@
 import type { TracePayload } from '../trace/types'
+import type { GraphSettings } from '../settings/graphSettings'
 
 const layoutStorageVersion = 'elk-v1'
 const layoutStoragePrefix = 'trace-layout:'
@@ -11,9 +12,10 @@ export type NodePosition = {
 
 export type LayoutPositions = Record<string, NodePosition>
 
-function hashTrace(payload: TracePayload) {
+function hashTrace(payload: TracePayload, settings: GraphSettings) {
   const source = JSON.stringify({
     layout_version: layoutStorageVersion,
+    layering_strategy: settings.layeringStrategy,
     model_name: payload.model_name,
     nodes: payload.graph.nodes.map((node) => node.id),
     edges: payload.graph.edges.map((edge) => [edge.source, edge.target, edge.source_output, edge.target_input]),
@@ -27,8 +29,8 @@ function hashTrace(payload: TracePayload) {
   return (hash >>> 0).toString(36)
 }
 
-function layoutStorageKey(payload: TracePayload) {
-  return `${layoutStoragePrefix}${hashTrace(payload)}`
+export function layoutStorageKey(payload: TracePayload, settings: GraphSettings) {
+  return `${layoutStoragePrefix}${hashTrace(payload, settings)}`
 }
 
 function warnMalformedStoredLayout(error?: unknown) {
@@ -94,8 +96,8 @@ function isLayoutPositions(value: unknown): value is LayoutPositions {
   return Object.values(value).every(isNodePosition)
 }
 
-export function loadStoredPositions(payload: TracePayload): LayoutPositions {
-  const key = layoutStorageKey(payload)
+export function loadStoredPositions(payload: TracePayload, settings: GraphSettings): LayoutPositions {
+  const key = layoutStorageKey(payload, settings)
   try {
     const stored = window.localStorage.getItem(key)
     if (!stored) return {}
@@ -123,8 +125,8 @@ export function loadStoredPositions(payload: TracePayload): LayoutPositions {
   }
 }
 
-export function saveStoredPositions(payload: TracePayload, positions: LayoutPositions) {
-  const key = layoutStorageKey(payload)
+export function saveStoredPositions(payload: TracePayload, settings: GraphSettings, positions: LayoutPositions) {
+  const key = layoutStorageKey(payload, settings)
   if (!Object.keys(positions).length) {
     safeRemoveItem(key)
     return

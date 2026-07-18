@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import { Topbar } from './app/Topbar'
 import { EmptyTraceState } from './app/EmptyTraceState'
@@ -6,11 +6,14 @@ import { TraceRecovery } from './app/TraceRecovery'
 import { getTraceViewState } from './app/traceViewState'
 import { cancelTrace, consumeTraceFile, createTraceRunId, runUserTrace, type RunTraceResponse, type TraceRunState, type TraceWorkerError } from './desktop/desktopTraceApi'
 import { GraphPanel } from './graph/GraphPanel'
+import { loadStoredPositions } from './graph/layoutStorage'
 import { useGraphModel } from './graph/useGraphModel'
 import { useGraphViewport } from './graph/useGraphViewport'
 import { useNodeDrag } from './graph/useNodeDrag'
 import { ModelSummary } from './inspector/ModelSummary'
 import { NodeInspector } from './inspector/NodeInspector'
+import { loadGraphSettings, saveGraphSettings } from './settings/graphSettings'
+import { SettingsModal } from './settings/SettingsModal'
 import { useTraceLoader } from './trace/useTraceLoader'
 import { UserTracePanel } from './userTrace/UserTracePanel'
 import type { UserTraceDraft } from './userTrace/UserTracePanel'
@@ -27,6 +30,8 @@ function App() {
   const cancellingDesktopRunId = useRef<string | null>(null)
   const [desktopTraceFailure, setDesktopTraceFailure] = useState<TraceFailure | null>(null)
   const [isUserTraceOpen, setIsUserTraceOpen] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [graphSettings, setGraphSettings] = useState(loadGraphSettings)
   const onTraceApplied = useCallback(() => {
     setSelectedNodeId(null)
     setIsolatedNodeIds(null)
@@ -36,7 +41,7 @@ function App() {
     layoutPositions,
     setLayoutPositions,
     loadTracePayload,
-  } = useTraceLoader({ onTraceApplied })
+  } = useTraceLoader({ onTraceApplied, settings: graphSettings })
 
   const {
     layout,
@@ -53,8 +58,13 @@ function App() {
   } = useGraphModel({
     trace,
     layoutPositions,
+    settings: graphSettings,
     selectedNodeId,
   })
+
+  useEffect(() => {
+    saveGraphSettings(graphSettings)
+  }, [graphSettings])
 
   const {
     viewportRef,
@@ -82,6 +92,11 @@ function App() {
     scale: view.scale,
     setLayoutPositions,
   })
+
+  function updateGraphSettings(nextSettings: typeof graphSettings) {
+    setGraphSettings(nextSettings)
+    if (trace) setLayoutPositions(loadStoredPositions(trace, nextSettings))
+  }
 
   function focusNode(nodeId: string, options: { centerCamera?: boolean } = {}) {
     if (!nodesById.has(nodeId)) return
@@ -271,6 +286,7 @@ function App() {
           modelName={trace.model_name}
           onOpenUserTrace={openUserTrace}
           onFitGraph={resetGraphPositions}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         <GraphPanel
@@ -332,6 +348,12 @@ function App() {
     <div className={`app-root app-shell ${theme}`}>
       {applicationView}
       {tracePanel}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        settings={graphSettings}
+        onChange={updateGraphSettings}
+        onClose={() => setIsSettingsOpen(false)}
+      />
     </div>
   )
 }

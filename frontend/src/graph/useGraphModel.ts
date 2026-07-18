@@ -4,6 +4,7 @@ import { edgeMap, graphStageBounds } from './graphDerivations'
 import { LayoutWorkerClient } from './layoutWorkerClient'
 import type { LayoutPositions } from './layoutStorage'
 import type { TracePayload } from '../trace/types'
+import type { GraphSettings } from '../settings/graphSettings'
 
 type LayoutState = {
   trace: TracePayload | null
@@ -15,10 +16,12 @@ type LayoutState = {
 export function useGraphModel({
   trace,
   layoutPositions,
+  settings,
   selectedNodeId,
 }: {
   trace: TracePayload | null
   layoutPositions: LayoutPositions
+  settings: GraphSettings
   selectedNodeId: string | null
 }) {
   const layoutRequestRef = useRef(0)
@@ -41,7 +44,7 @@ export function useGraphModel({
       .then(() => {
         if (isCancelled || layoutRequestRef.current !== requestId) return undefined
         setLayoutState({ trace, layout: null, isLayoutPending: true, layoutError: null })
-        return layoutWorker.layout(trace.graph.nodes, trace.graph.edges)
+        return layoutWorker.layout(trace.graph.nodes, trace.graph.edges, settings)
       })
       .then((nextLayout) => {
         if (!nextLayout) return
@@ -62,7 +65,7 @@ export function useGraphModel({
       isCancelled = true
       layoutWorker.cancel()
     }
-  }, [layoutWorker, trace])
+  }, [layoutWorker, settings, trace])
 
   const isCurrentLayout = layoutState.trace === trace
   const layout = isCurrentLayout ? layoutState.layout : null

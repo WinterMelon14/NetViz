@@ -4,6 +4,7 @@ import ElkWorker from 'elkjs/lib/elk-worker.min.js?worker'
 import type { TraceEdge, TraceNode } from '../trace/types'
 import { columnGap, nodeHeight, padding, rowGap } from './constants'
 import { nodeCardWidth } from './nodePresentation'
+import { defaultGraphSettings, type GraphSettings } from '../settings/graphSettings'
 
 export type LayoutResult = {
   nodes: (TraceNode & {
@@ -184,9 +185,24 @@ function fallbackGraphSize(nodes: { x: number; y: number; width: number; height:
   }
 }
 
+export function layoutOptionsFor(settings: GraphSettings) {
+  return {
+    'elk.algorithm': 'layered',
+    'elk.direction': 'RIGHT',
+    'elk.spacing.nodeNode': String(rowGap),
+    'elk.layered.spacing.nodeNodeBetweenLayers': String(columnGap),
+    'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+    'elk.layered.layering.strategy': settings.layeringStrategy,
+    'elk.padding':
+      `[top=${padding},left=${padding},bottom=${padding},right=${padding}]`,
+  }
+}
+
 export async function buildLayoutPositions(
   nodes: LayoutNodeInput[],
   edges: TraceEdge[],
+  settings: GraphSettings = defaultGraphSettings,
 ): Promise<LayoutPositionResult> {
   if (!nodes.length) return fallbackLayout()
 
@@ -197,26 +213,9 @@ export async function buildLayoutPositions(
       nodeIds.has(edge.source) &&
       nodeIds.has(edge.target),
   )
-  /* 
-    A few options I like
-    Network + DF_MODEL_ORDER
-    Network + NETWORK_SIMPLEX
-    Brandes + NETWORK_SIMPLEX
-    Network + LONGEST_PATH_SOURCE
-  */
   const elkGraph: ElkNode = {
     id: 'trace-root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': String(rowGap),
-      'elk.layered.spacing.nodeNodeBetweenLayers': String(columnGap),
-      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-      'elk.layered.layering.strategy': 'DF_MODEL_ORDER',
-      'elk.padding':
-        `[top=${padding},left=${padding},bottom=${padding},right=${padding}]`,
-    },
+    layoutOptions: layoutOptionsFor(settings),
     children: nodes.map((node) => ({
       id: node.id,
       width: node.width,
@@ -271,10 +270,15 @@ export async function buildLayoutPositions(
   }
 }
 
-export async function buildLayout(nodes: TraceNode[], edges: TraceEdge[]): Promise<LayoutResult> {
+export async function buildLayout(
+  nodes: TraceNode[],
+  edges: TraceEdge[],
+  settings: GraphSettings = defaultGraphSettings,
+): Promise<LayoutResult> {
   const layout = await buildLayoutPositions(
     nodes.map((node) => ({ id: node.id, width: nodeCardWidth(node), height: nodeHeight })),
     edges,
+    settings,
   )
   const positionsById = new Map(layout.nodes.map((node) => [node.id, node]))
   return {
