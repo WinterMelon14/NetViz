@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,19 @@ def default_worker_command(request_path: Path) -> list[str]:
 
 def frontend_index_path() -> Path:
     return REPO_ROOT / "frontend" / "dist" / "index.html"
+
+
+def configure_frontend_mime_types() -> None:
+    mimetypes.init()
+    for content_type, suffix in (
+        ("text/javascript", ".js"),
+        ("text/javascript", ".mjs"),
+        ("text/css", ".css"),
+        ("image/svg+xml", ".svg"),
+        ("application/json", ".json"),
+        ("application/wasm", ".wasm"),
+    ):
+        mimetypes.add_type(content_type, suffix, strict=True)
 
 
 def terminate_process(process: subprocess.Popen[str]) -> None:
@@ -455,6 +469,8 @@ def main(development: bool = False):
                 "the frontend before launching the desktop application."
             )
         frontend_url = str(index_path)
+
+    configure_frontend_mime_types()
 
     try:
         import webview

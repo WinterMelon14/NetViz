@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "NetViz"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 
 def _ensure_cli_streams() -> None:

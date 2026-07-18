@@ -1,5 +1,6 @@
 import io
 import json
+import mimetypes
 import sys
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from desktop import __main__ as desktop_main
-from desktop.host import default_worker_command, main as host_main
+from desktop.host import configure_frontend_mime_types, default_worker_command, main as host_main
 
 
 class _Event:
@@ -18,6 +19,17 @@ class _Event:
 
 
 class DesktopEntrypointTests(unittest.TestCase):
+    def test_release_overrides_hostile_windows_javascript_mime_mapping(self):
+        mimetypes.add_type("text/plain", ".js", strict=True)
+
+        configure_frontend_mime_types()
+
+        self.assertEqual(mimetypes.guess_type("index.js", strict=True)[0], "text/javascript")
+        self.assertEqual(mimetypes.guess_type("worker.mjs", strict=True)[0], "text/javascript")
+        self.assertEqual(mimetypes.guess_type("styles.css", strict=True)[0], "text/css")
+        self.assertEqual(mimetypes.guess_type("icon.svg", strict=True)[0], "image/svg+xml")
+        self.assertEqual(mimetypes.guess_type("module.wasm", strict=True)[0], "application/wasm")
+
     def test_worker_command_uses_module_dispatcher_in_source_mode(self):
         request = Path("request.json")
         with patch.object(sys, "frozen", False, create=True):

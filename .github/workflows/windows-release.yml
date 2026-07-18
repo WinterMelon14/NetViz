@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v1.0.0'
+      - 'v1.0.1'
 
 permissions:
   contents: read
@@ -47,7 +47,7 @@ jobs:
       - name: Upload Windows x64 ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: NetViz-windows-x64-1.0.0
-          path: dist/NetViz-windows-x64-1.0.0.zip
+          name: NetViz-windows-x64-1.0.1
+          path: dist/NetViz-windows-x64-1.0.1.zip
           if-no-files-found: error
           retention-days: 14

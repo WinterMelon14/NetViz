@@ -10,20 +10,20 @@ system Python installation or a Vite development server.
 
 ## Download
 
-NetViz 1.0.0 is distributed as:
+NetViz 1.0.1 is distributed as:
 
-`NetViz-windows-x64-1.0.0.zip`
+`NetViz-windows-x64-1.0.1.zip`
 
 Download the ZIP from the releases page.
 
-NetViz 1.0.0 supports 64-bit Windows 10 and Windows 11. Microsoft Edge WebView2
+NetViz 1.0.1 supports 64-bit Windows 10 and Windows 11. Microsoft Edge WebView2
 Runtime is required.
 
 ## Install and run
 
 NetViz does not use an installer.
 
-1. Save `NetViz-windows-x64-1.0.0.zip` to your computer.
+1. Save `NetViz-windows-x64-1.0.1.zip` to your computer.
 2. Right-click the ZIP and select **Extract All**.
 3. Open the extracted folder.
 4. Run `NetViz.exe`.
@@ -31,7 +31,7 @@ NetViz does not use an installer.
 Keep `NetViz.exe` and the `_internal` folder together. Do not run the executable
 from inside the ZIP, and do not copy `NetViz.exe` by itself.
 
-NetViz 1.0.0 is unsigned, so Windows SmartScreen may display a warning. If you
+NetViz 1.0.1 is unsigned, so Windows SmartScreen may display a warning. If you
 received the ZIP from a source you trust, select **More info**, verify that the
 application is NetViz, and then select **Run anyway**.
 
@@ -80,7 +80,7 @@ The NetViz executable contains its own Python runtime and its own copies of
 PyTorch and NumPy. It does not use packages installed in your system Python,
 Conda environment, or virtual environment.
 
-NetViz 1.0.0 supports model code that imports:
+NetViz 1.0.1 supports model code that imports:
 
 - Python standard-library modules.
 - The bundled `torch` package.
@@ -89,7 +89,7 @@ NetViz 1.0.0 supports model code that imports:
   directory.
 
 Packages that are not bundled, such as `torchvision` and `transformers`, are not
-available in the frozen 1.0.0 runtime. Installing them into another Python
+available in the frozen 1.0.1 runtime. Installing them into another Python
 environment will not make them available to NetViz.
 
 Local imports and relative model resources should be kept alongside the selected
@@ -119,7 +119,7 @@ access.
 
 ### Windows blocks the executable
 
-NetViz 1.0.0 is unsigned. Only if you trust where the ZIP came from, use
+NetViz 1.0.1 is unsigned. Only if you trust where the ZIP came from, use
 **More info** and **Run anyway** in the SmartScreen dialog.
 
 ### A model reports an unavailable import
