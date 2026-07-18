@@ -14,11 +14,10 @@ NetViz 1.0.0 is distributed as:
 
 `NetViz-windows-x64-1.0.0.zip`
 
-Download the ZIP from the official release source or a trusted link supplied by
-the publisher. Do not download or run repackaged copies from unknown sources.
+Download the ZIP from the releases page.
 
 NetViz 1.0.0 supports 64-bit Windows 10 and Windows 11. Microsoft Edge WebView2
-Runtime is required and is already installed on most current Windows systems.
+Runtime is required.
 
 ## Install and run
 
