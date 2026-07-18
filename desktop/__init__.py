@@ -1,1 +1,1 @@
-"""Desktop spike modules for the pywebview trace pipeline."""
+"""NetViz desktop host and isolated trace-worker runtime."""

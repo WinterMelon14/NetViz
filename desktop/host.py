@@ -55,7 +55,13 @@ def read_bounded_text(path: Path, max_bytes: int) -> tuple[str, bool]:
 
 
 def default_worker_command(request_path: Path) -> list[str]:
-    return [sys.executable, "-m", "desktop.trace_worker", str(request_path)]
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--trace-worker", str(request_path)]
+    return [sys.executable, "-m", "desktop", "--trace-worker", str(request_path)]
+
+
+def frontend_index_path() -> Path:
+    return REPO_ROOT / "frontend" / "dist" / "index.html"
 
 
 def terminate_process(process: subprocess.Popen[str]) -> None:
@@ -203,7 +209,7 @@ class TraceRunManager:
                 active_run_id,
                 "timeout",
                 "Trace timed out",
-                "The trace worker exceeded the development timeout and was terminated.",
+                "The trace worker exceeded the configured timeout and was terminated.",
                 "worker_timeout",
                 {"timeout_seconds": self.timeout_seconds, "stderr": stderr},
             )
@@ -401,7 +407,6 @@ class DesktopTraceApi:
     def __init__(self, manager: TraceRunManager | None = None, selected_files: SourceHandles | None = None):
         self.manager = manager or TraceRunManager()
         self.sources = selected_files or SourceHandles()
-        self.selected_files = self.sources
 
     def runUserTrace(self, request: Any):
         resolved = self.sources.trace_request(request)
@@ -417,9 +422,6 @@ class DesktopTraceApi:
                 error["message"] = error["message"].replace(source_path, display_name)
         return result
 
-    def runSelectedUserTrace(self, request: Any):
-        return self.runUserTrace(request)
-
     def selectPythonFile(self):
         return self.sources.select()
 
@@ -432,9 +434,6 @@ class DesktopTraceApi:
     def releasePythonSource(self, sourceId: Any):
         return self.sources.release(sourceId)
 
-    def inspectSelectedPythonFile(self, selectionId: Any):
-        return self.sources.inspect(selectionId)
-
     def cancelTrace(self, runId: str):
         return self.manager.cancel_trace(runId)
 
@@ -444,24 +443,43 @@ class DesktopTraceApi:
     def close(self):
         self.sources.close()
 
-def main():
+def main(development: bool = False):
+    frontend_url: str
+    if development:
+        frontend_url = DEV_SERVER_URL
+    else:
+        index_path = frontend_index_path()
+        if not index_path.is_file():
+            raise SystemExit(
+                "NetViz frontend assets are missing. Reinstall NetViz or rebuild "
+                "the frontend before launching the desktop application."
+            )
+        frontend_url = str(index_path)
+
     try:
         import webview
     except ImportError as exc:
         raise SystemExit(
-            "pywebview is not installed in this Python environment. "
-            "Install pywebview, start the Vite dev server, then run this module again."
+            "NetViz could not load its desktop webview runtime. Reinstall NetViz "
+            "and confirm that Microsoft Edge WebView2 Runtime is available."
         ) from exc
 
     api = DesktopTraceApi()
     window = webview.create_window(
-        "PyTorch Trace Visualizer",
-        DEV_SERVER_URL,
+        "NetViz",
+        frontend_url,
         js_api=api,
     )
     window.events.closed += lambda *args: api.close()
-    webview.start(debug=True)
+    try:
+        webview.start(debug=development, http_server=not development)
+    except Exception as exc:
+        api.close()
+        raise SystemExit(
+            "NetViz could not start its desktop window. Confirm that Microsoft "
+            f"Edge WebView2 Runtime is installed. Technical detail: {exc}"
+        ) from exc
 
 
 if __name__ == "__main__":
-    main()
+    main(development="--dev" in sys.argv[1:])

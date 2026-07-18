@@ -1,0 +1,28 @@
+{
+  "input_schema_version": 2,
+  "args": [
+    {
+      "kind": "tuple",
+      "items": [
+        { "kind": "integer", "value": 3 },
+        { "kind": "none" }
+      ]
+    }
+  ],
+  "kwargs": {
+    "mask": {
+      "kind": "tensor",
+      "shape": [2, 2],
+      "dtype": "int64",
+      "generator": "random_integer",
+      "integer_max_exclusive": 2
+    },
+    "settings": {
+      "kind": "dict",
+      "entries": [
+        { "key": "enabled", "value": { "kind": "boolean", "value": true } },
+        { "key": "name", "value": { "kind": "string", "value": "demo" } }
+      ]
+    }
+  }
+}

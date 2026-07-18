@@ -39,9 +39,7 @@ declare global {
     pywebview?: {
       api?: {
         runUserTrace?: (request: UserTraceBridgeRequest) => Promise<unknown>
-        runSelectedUserTrace?: (request: UserTraceBridgeRequest) => Promise<unknown>
         selectPythonFile?: () => Promise<unknown>
-        inspectSelectedPythonFile?: (selectionId: string) => Promise<unknown>
         registerInlinePythonSource?: (request: { sourceText: string; displayName?: string }) => Promise<unknown>
         inspectPythonSource?: (sourceId: string) => Promise<unknown>
         releasePythonSource?: (sourceId: string) => Promise<unknown>

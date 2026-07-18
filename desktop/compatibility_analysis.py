@@ -139,12 +139,13 @@ def _import_findings(module: ast.Module, project_context: dict[str, Any] | None)
             elif root in standard:
                 code, status, title = "import_standard_library", "supported", "Standard-library import"
                 explanation, remediation = f"{name} is available from the Python standard library.", None
-            elif root in {"torch", "torchvision"}:
-                code, status, title = "import_runtime_dependency", "supported", "PyTorch runtime import"
-                explanation, remediation = f"{name} is expected in the selected tracing environment.", None
+            elif root in {"torch", "numpy"}:
+                code, status, title = "import_runtime_dependency", "supported", "Bundled runtime import"
+                explanation, remediation = f"{name} is bundled with the NetViz tracing environment.", None
             else:
-                code, status, title = "import_resolution_unknown", "unknown", "Import availability is unknown"
-                explanation, remediation = f"Static inspection cannot determine whether {name} is a local or installed dependency.", "Ensure the dependency is available in the tracing environment."
+                code, status, title = "import_runtime_dependency_unavailable", "unsupported", "Third-party import is unavailable"
+                explanation = f"{name} is not bundled with the NetViz 1.0 tracing environment."
+                remediation = "Use the Python standard library, torch, numpy, or declare the import as a local project module."
             items.append(finding("import", code, status, title, explanation, "source", source_evidence(ast.unparse(node), node.lineno), remediation))
     return _dedupe(items)
 

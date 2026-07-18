@@ -12,6 +12,7 @@ from desktop.user_model_runtime import (
     build_provider_inputs,
     instantiate_model,
     load_project_user_module,
+    project_execution_context,
 )
 from desktop.user_trace_request import UserTraceRequestError, validate_user_trace_request
 from desktop.trace_protocol import (
@@ -104,37 +105,38 @@ def run_trace(request_path: str | None = None):
         )
 
     try:
-        with load_project_user_module(
-            request["source"]["file_path"],
-            run_id,
-            request["source"]["content_sha256"],
-            Path(request_path).parent,
-            request["project_context"],
-        ) as module:
-            model = instantiate_model(
-                module,
-                request["source"]["class_name"],
-                request["constructor"]["args"],
-                request["constructor"]["kwargs"],
-            )
-            if request["input_provider"]:
-                example_args, example_kwargs, diagnostic_specs = build_provider_inputs(module, request["input_provider"])
-            elif request["input_schema_version"] == 2:
-                example_args, example_kwargs, diagnostic_specs = build_structured_inputs(request["args"], request["kwargs"])
-            else:
-                example_args = build_tensor_inputs(request["inputs"])
-                example_kwargs = {}
-                diagnostic_specs = request["inputs"]
-            from util.summary import model_summary
+        with project_execution_context(request["project_context"]):
+            with load_project_user_module(
+                request["source"]["file_path"],
+                run_id,
+                request["source"]["content_sha256"],
+                Path(request_path).parent,
+                request["project_context"],
+            ) as module:
+                model = instantiate_model(
+                    module,
+                    request["source"]["class_name"],
+                    request["constructor"]["args"],
+                    request["constructor"]["kwargs"],
+                )
+                if request["input_provider"]:
+                    example_args, example_kwargs, diagnostic_specs = build_provider_inputs(module, request["input_provider"])
+                elif request["input_schema_version"] == 2:
+                    example_args, example_kwargs, diagnostic_specs = build_structured_inputs(request["args"], request["kwargs"])
+                else:
+                    example_args = build_tensor_inputs(request["inputs"])
+                    example_kwargs = {}
+                    diagnostic_specs = request["inputs"]
+                from util.summary import model_summary
 
-            payload = model_summary(
-                model,
-                *example_args,
-                example_kwargs=example_kwargs,
-                run_shape_prop=False,
-                profile_config=request["profile"] if request["trace_mode"] == "profile" else None,
-            )
-            return trace_success_for_transport(run_id, payload, request.get("output_path"))
+                payload = model_summary(
+                    model,
+                    *example_args,
+                    example_kwargs=example_kwargs,
+                    run_shape_prop=False,
+                    profile_config=request["profile"] if request["trace_mode"] == "profile" else None,
+                )
+                return trace_success_for_transport(run_id, payload, request.get("output_path"))
     except UserTraceRuntimeError as exc:
         return trace_error(
             run_id,
@@ -158,8 +160,9 @@ def run_trace(request_path: str | None = None):
         )
 
 
-def main():
-    request_path = sys.argv[1] if len(sys.argv) > 1 else None
+def main(request_path: str | None = None):
+    if request_path is None:
+        request_path = sys.argv[1] if len(sys.argv) > 1 else None
     print(json.dumps(run_trace(request_path)), flush=True)
 
 

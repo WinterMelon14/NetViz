@@ -36,7 +36,9 @@ export function parsePythonSource(value: unknown): PythonSource | null {
   if (!isRecord(value)) return null
   const { sourceId, kind, displayName, sizeBytes } = value
   if (typeof sourceId !== 'string' || (kind !== 'file' && kind !== 'inline') || typeof displayName !== 'string' || typeof sizeBytes !== 'number' || !Number.isFinite(sizeBytes) || sizeBytes < 0) return null
-  return { sourceId, kind, displayName, sizeBytes, projectRootDisplay: typeof value.projectRootDisplay === 'string' ? value.projectRootDisplay : undefined }
+  const source: PythonSource = { sourceId, kind, displayName, sizeBytes }
+  if (typeof value.projectRootDisplay === 'string') source.projectRootDisplay = value.projectRootDisplay
+  return source
 }
 
 export function parseRegisterInlineSourceResponse(value: unknown): RegisterInlineSourceResult {

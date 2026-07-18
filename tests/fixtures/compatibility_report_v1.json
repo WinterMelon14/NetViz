@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "className": "FixtureModel",
+  "findings": [
+    {
+      "category": "input",
+      "code": "input_shape_unresolved",
+      "status": "unknown",
+      "title": "x shape is unresolved",
+      "explanation": "Arbitrary tensor shapes cannot be derived reliably from source alone.",
+      "origin": "heuristic",
+      "evidence": [{ "kind": "source", "text": "x: torch.Tensor", "lineNumber": 8 }],
+      "remediation": "Confirm a representative shape.",
+      "target": { "kind": "forward_parameter", "name": "x" }
+    }
+  ],
+  "tracingOutcome": {
+    "status": "unknown",
+    "statement": "Symbolic tracing outcome is unknown until the model is executed."
+  }
+}

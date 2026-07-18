@@ -1,0 +1,53 @@
+name: Windows release build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v1.0.0'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Create build environment
+        shell: pwsh
+        run: |
+          py -3.13 -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --requirement requirements-build.txt
+          Push-Location frontend
+          npm ci
+          Pop-Location
+
+      - name: Build and verify unsigned NetViz release
+        shell: pwsh
+        run: .\scripts\build_windows.ps1 -SkipInstall
+
+      - name: Upload Windows x64 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetViz-windows-x64-1.0.0
+          path: dist/NetViz-windows-x64-1.0.0.zip
+          if-no-files-found: error
+          retention-days: 14
