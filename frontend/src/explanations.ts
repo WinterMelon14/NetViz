@@ -176,6 +176,7 @@ function explainLinear(node: TraceNodeForExplanation): Explanation | null {
   const outFeatures = outputShape.at(-1)
   const batchIn = inputShape.slice(0, -1)
   const batchOut = outputShape.slice(0, -1)
+  const hasBias = node.attrs?.bias !== false
 
   return {
     title: 'Linear',
@@ -188,13 +189,13 @@ function explainLinear(node: TraceNodeForExplanation): Explanation | null {
     description: rich(
       code('Linear'),
       ' applies a learned matrix multiplication (',
-      code('y = xWᵀ + b'),
+      code(hasBias ? 'y = xWᵀ + b' : 'y = xWᵀ'),
       ') to the last dimension of ',
       code(shapeText(inputShape)),
       '. Leading batch dimensions are preserved.',
     ),
     formula: {
-      display: node.formula ?? 'y = xW^T + b',
+      display: node.formula ?? (hasBias ? 'y = xW^T + b' : 'y = xW^T'),
       substitution: `${shapeText(inputShape)} ⟶ ${shapeText(outputShape)}`,
     },
     shapeSteps: [
@@ -1009,7 +1010,8 @@ function explainRMSNorm(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const eps = Number(node.attrs?.eps ?? 1e-8)
+  const eps = node.attrs?.eps
+  const epsText = eps === undefined || eps === null ? 'dtype-dependent default eps' : `eps=${Number(eps)}`
   const affineDescription = affineSuffix(node, 'per-element')
 
   return {
@@ -1018,7 +1020,7 @@ function explainRMSNorm(node: TraceNodeForExplanation): Explanation | null {
     description: rich(
       code('RMSNorm'),
       ' divides each value by the root mean square of the elements along the normalized dimension (',
-      code(`eps=${eps}`),
+      code(epsText),
       ')',
       ...affineDescription,
       ' It skips the mean subtraction step of ',
@@ -1080,6 +1082,13 @@ function explainInstanceNorm1d(node: TraceNodeForExplanation): Explanation | nul
   const [, c, l] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
   const affineDescription = affineSuffix(node, 'per-channel', false)
+  const usesCurrentStats = node.attrs?.training === true || node.attrs?.track_running_stats !== true
+  const statDescription = usesCurrentStats
+    ? 'statistics are computed per sample rather than across the batch, so batch size has no effect.'
+    : 'stored running statistics from training are applied independently to each channel.'
+  const statSubstitution = usesCurrentStats
+    ? `mean/var computed per channel per sample over L=${l}`
+    : 'stored statistics applied independently to each channel'
 
   return {
     title: 'InstanceNorm1d',
@@ -1092,12 +1101,13 @@ function explainInstanceNorm1d(node: TraceNodeForExplanation): Explanation | nul
       code(`eps=${eps}`),
       '). Unlike ',
       code('BatchNorm'),
-      ', statistics are computed per sample rather than across the batch, so batch size has no effect.',
+      ', ',
+      statDescription,
       ...affineDescription,
     ),
     formula: {
       display: affineFormula('out = (x - mean) / sqrt(var + eps)', node, false),
-      substitution: `mean/var computed per channel per sample over L=${l}`,
+      substitution: statSubstitution,
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -1113,6 +1123,13 @@ function explainInstanceNorm2d(node: TraceNodeForExplanation): Explanation | nul
   const [, c, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
   const affineDescription = affineSuffix(node, 'per-channel', false)
+  const usesCurrentStats = node.attrs?.training === true || node.attrs?.track_running_stats !== true
+  const statDescription = usesCurrentStats
+    ? 'statistics are computed per sample rather than across the batch.'
+    : 'stored running statistics from training are applied independently to each channel.'
+  const statSubstitution = usesCurrentStats
+    ? `mean/var computed per channel per sample over H=${h}, W=${w}`
+    : 'stored statistics applied independently to each channel'
 
   return {
     title: 'InstanceNorm2d',
@@ -1123,12 +1140,14 @@ function explainInstanceNorm2d(node: TraceNodeForExplanation): Explanation | nul
       code(`H=${h}, W=${w}`),
       ', ',
       code(`eps=${eps}`),
-      '). Widely used in style transfer where per-sample, per-channel statistics carry style information.',
+      '). ',
+      statDescription,
+      ' Widely used in style transfer where per-sample, per-channel statistics carry style information.',
       ...affineDescription,
     ),
     formula: {
       display: affineFormula('out = (x - mean) / sqrt(var + eps)', node, false),
-      substitution: `mean/var computed per channel per sample over H=${h}, W=${w}`,
+      substitution: statSubstitution,
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -1144,6 +1163,13 @@ function explainInstanceNorm3d(node: TraceNodeForExplanation): Explanation | nul
   const [, c, d, h, w] = inputShape
   const eps = Number(node.attrs?.eps ?? 1e-5)
   const affineDescription = affineSuffix(node, 'per-channel', false)
+  const usesCurrentStats = node.attrs?.training === true || node.attrs?.track_running_stats !== true
+  const statDescription = usesCurrentStats
+    ? 'statistics are computed per sample rather than across the batch.'
+    : 'stored running statistics from training are applied independently to each channel.'
+  const statSubstitution = usesCurrentStats
+    ? `mean/var computed per channel per sample over D=${d}, H=${h}, W=${w}`
+    : 'stored statistics applied independently to each channel'
 
   return {
     title: 'InstanceNorm3d',
@@ -1154,14 +1180,16 @@ function explainInstanceNorm3d(node: TraceNodeForExplanation): Explanation | nul
       code(`D=${d}, H=${h}, W=${w}`),
       ', ',
       code(`eps=${eps}`),
-      '). The 3D counterpart to ',
+      '). ',
+      statDescription,
+      ' The 3D counterpart to ',
       code('InstanceNorm2d'),
       ', used in volumetric medical imaging and video models.',
       ...affineDescription,
     ),
     formula: {
       display: affineFormula('out = (x - mean) / sqrt(var + eps)', node, false),
-      substitution: `mean/var computed per channel per sample over D=${d}, H=${h}, W=${w}`,
+      substitution: statSubstitution,
     },
     shapeSteps: [
       { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
@@ -1903,8 +1931,7 @@ function explainPermute(node: TraceNodeForExplanation): Explanation | null {
       code(shapeText(inputShape)),
       ' ⟶ ',
       code(shapeText(outputShape)),
-      ...(dims ? [' using order ', code(`(${dims.join(', ')})`)] : []),
-      '.',
+      ...(dims ? [' using order ', code(`(${dims.join(', ')})`)] : [])
     ),
     description: rich(
       code('permute'),
@@ -1936,8 +1963,9 @@ function explainTranspose(node: TraceNodeForExplanation): Explanation | null {
   const outputShape = tensorValues(node.outputs)[0]?.shape
   if (!inputShape || !outputShape) return null
 
-  const dim0 = normalizeDim(Number(node.attrs?.dim0 ?? 0), inputShape.length)
-  const dim1 = normalizeDim(Number(node.attrs?.dim1 ?? 1), inputShape.length)
+  const rawDims = Array.isArray(node.attrs?.dims) ? node.attrs.dims.map(Number) : null
+  const dim0 = normalizeDim(Number(node.attrs?.dim0 ?? rawDims?.[0] ?? 0), inputShape.length)
+  const dim1 = normalizeDim(Number(node.attrs?.dim1 ?? rawDims?.[1] ?? 1), inputShape.length)
 
   return {
     title: 'transpose',
@@ -2085,8 +2113,7 @@ function explainContiguous(node: TraceNodeForExplanation): Explanation | null {
       ' only change strides without moving data; ',
       code('contiguous'),
       ' returns the original tensor if it already has the requested contiguous layout, or copies into that layout when needed. Often required before calling ',
-      code('view'),
-      '.',
+      code('view')
     ),
     formula: {
       display: 'out = input.contiguous()',
@@ -2729,7 +2756,7 @@ const shapeTransformExplanations: ExplanationMatcher[] = [
 ]
 
 const tensorOperationExplanations: ExplanationMatcher[] = [
-  { labels: ['cat'], explain: explainCat },
+  { labels: ['cat', 'concat'], explain: explainCat },
   { labels: ['add', 'Add'], explain: explainAdd },
 ]
 

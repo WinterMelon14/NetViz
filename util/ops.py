@@ -14,6 +14,18 @@ def pair(x):
     return [x, x]
 
 
+def node_arg(node: fx.Node, position: int, keyword: str, default=None):
+    if keyword in node.kwargs:
+        return node.kwargs[keyword]
+    if len(node.args) > position:
+        return node.args[position]
+    return default
+
+
+def module_bias(module: nn.Module):
+    return getattr(module, "bias", None) is not None
+
+
 def module_attrs(module: nn.Module):
     if isinstance(module, nn.Linear):
         return {
@@ -68,6 +80,8 @@ def module_attrs(module: nn.Module):
             "momentum": module.momentum,
             "affine": module.affine,
             "track_running_stats": module.track_running_stats,
+            "training": module.training,
+            "bias": module_bias(module),
         }
 
     if isinstance(module, nn.LayerNorm):
@@ -75,17 +89,105 @@ def module_attrs(module: nn.Module):
             "normalized_shape": list(module.normalized_shape),
             "eps": module.eps,
             "elementwise_affine": module.elementwise_affine,
+            "bias": module_bias(module),
         }
 
-    if isinstance(module, nn.Dropout):
+    if hasattr(nn, "RMSNorm") and isinstance(module, nn.RMSNorm):
+        return {
+            "normalized_shape": list(module.normalized_shape),
+            "eps": module.eps,
+            "elementwise_affine": module.elementwise_affine,
+            "bias": False,
+        }
+
+    if isinstance(module, nn.GroupNorm):
+        return {
+            "num_groups": module.num_groups,
+            "num_channels": module.num_channels,
+            "eps": module.eps,
+            "affine": module.affine,
+            "bias": module_bias(module),
+        }
+
+    if isinstance(module, (nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d)):
+        return {
+            "num_features": module.num_features,
+            "eps": module.eps,
+            "momentum": module.momentum,
+            "affine": module.affine,
+            "track_running_stats": module.track_running_stats,
+            "training": module.training,
+            "bias": module_bias(module),
+        }
+
+    if isinstance(module, (nn.Dropout, nn.Dropout1d, nn.Dropout2d, nn.Dropout3d, nn.AlphaDropout)):
         return {
             "p": module.p,
             "inplace": module.inplace,
+            "training": module.training,
         }
 
     if isinstance(module, nn.ReLU):
         return {
             "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.LeakyReLU):
+        return {
+            "negative_slope": module.negative_slope,
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.ELU):
+        return {
+            "alpha": module.alpha,
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.SELU):
+        return {
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.Hardsigmoid):
+        return {
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.SiLU):
+        return {
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.Mish):
+        return {
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.Hardswish):
+        return {
+            "inplace": module.inplace,
+        }
+
+    if isinstance(module, nn.Softmax):
+        return {
+            "dim": module.dim,
+        }
+
+    if isinstance(module, nn.LogSoftmax):
+        return {
+            "dim": module.dim,
+        }
+
+    if isinstance(module, nn.GELU):
+        return {
+            "approximate": module.approximate,
+        }
+
+    if isinstance(module, nn.Softplus):
+        return {
+            "beta": module.beta,
+            "threshold": module.threshold,
         }
 
     if isinstance(module, (nn.MaxPool1d, nn.MaxPool2d, nn.MaxPool3d)):
@@ -105,6 +207,12 @@ def module_attrs(module: nn.Module):
             "padding": jsonable(module.padding),
             "ceil_mode": module.ceil_mode,
             "count_include_pad": module.count_include_pad,
+            "divisor_override": getattr(module, "divisor_override", None),
+        }
+
+    if isinstance(module, (nn.AdaptiveAvgPool1d, nn.AdaptiveAvgPool2d, nn.AdaptiveAvgPool3d)):
+        return {
+            "output_size": jsonable(module.output_size),
         }
 
     if isinstance(module, nn.Embedding):
@@ -118,6 +226,12 @@ def module_attrs(module: nn.Module):
             "sparse": module.sparse,
         }
 
+    if isinstance(module, nn.Flatten):
+        return {
+            "start_dim": module.start_dim,
+            "end_dim": module.end_dim,
+        }
+
     return {}
 
 
@@ -126,7 +240,8 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
 
     if node.op == "call_method":
         if node.target == "permute":
-            attrs["dims"] = [jsonable(a) for a in node.args[1:]]
+            dims = node_arg(node, 1, "dims")
+            attrs["dims"] = jsonable(dims if isinstance(dims, (list, tuple)) else node.args[1:])
 
         elif node.target in {"reshape", "view"}:
             attrs["requested_shape"] = [jsonable(a) for a in node.args[1:]]
@@ -135,22 +250,76 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
                 attrs["resolved_shape"] = list(runtime_output.shape)
 
         elif node.target == "transpose":
-            attrs["dims"] = [jsonable(a) for a in node.args[1:]]
+            dim0 = node_arg(node, 1, "dim0")
+            dim1 = node_arg(node, 2, "dim1")
+            attrs["dims"] = [jsonable(dim0), jsonable(dim1)]
+            attrs["dim0"] = jsonable(dim0)
+            attrs["dim1"] = jsonable(dim1)
 
         elif node.target == "flatten":
-            attrs["args"] = [jsonable(a) for a in node.args[1:]]
-            attrs["kwargs"] = jsonable(node.kwargs)
+            attrs["start_dim"] = jsonable(node_arg(node, 1, "start_dim", 0))
+            attrs["end_dim"] = jsonable(node_arg(node, 2, "end_dim", -1))
+
+        elif node.target == "unsqueeze":
+            attrs["dim"] = jsonable(node_arg(node, 1, "dim", 0))
+
+        elif node.target == "expand":
+            attrs["size"] = [jsonable(a) for a in node.args[1:]]
+
+        elif node.target == "contiguous":
+            attrs["memory_format"] = jsonable(node.kwargs.get("memory_format"))
+
+        elif node.target == "chunk":
+            attrs["chunks"] = jsonable(node_arg(node, 1, "chunks"))
+            attrs["dim"] = jsonable(node_arg(node, 2, "dim", 0))
+
+        elif node.target == "split":
+            attrs["split_size_or_sections"] = jsonable(node_arg(node, 1, "split_size", node_arg(node, 1, "split_size_or_sections")))
+            attrs["dim"] = jsonable(node_arg(node, 2, "dim", 0))
+
+        elif node.target == "unbind":
+            attrs["dim"] = jsonable(node_arg(node, 1, "dim", 0))
+
+        elif node.target == "repeat":
+            attrs["repeats"] = [jsonable(a) for a in node.args[1:]]
+
+        elif node.target == "narrow":
+            attrs["dim"] = jsonable(node_arg(node, 1, "dim"))
+            attrs["start"] = jsonable(node_arg(node, 2, "start"))
+            attrs["length"] = jsonable(node_arg(node, 3, "length"))
+
+        elif node.target in {"mean", "sum"}:
+            attrs["dim"] = jsonable(node_arg(node, 1, "dim"))
+            attrs["keepdim"] = jsonable(node_arg(node, 2, "keepdim", False))
 
     elif node.op == "call_function":
         if node.target in {torch.cat, torch.concat}:
-            attrs["dim"] = jsonable(node.kwargs.get("dim", 0))
+            attrs["dim"] = jsonable(node_arg(node, 1, "dim", 0))
 
         elif node.target is torch.stack:
-            attrs["dim"] = jsonable(node.kwargs.get("dim", 0))
+            attrs["dim"] = jsonable(node_arg(node, 1, "dim", 0))
 
         elif node.target is torch.flatten:
-            attrs["start_dim"] = jsonable(node.kwargs.get("start_dim", 0))
-            attrs["end_dim"] = jsonable(node.kwargs.get("end_dim", -1))
+            attrs["start_dim"] = jsonable(node_arg(node, 1, "start_dim", 0))
+            attrs["end_dim"] = jsonable(node_arg(node, 2, "end_dim", -1))
+
+        elif node.target is torch.roll:
+            attrs["shifts"] = jsonable(node_arg(node, 1, "shifts"))
+            attrs["dims"] = jsonable(node_arg(node, 2, "dims"))
+
+        elif node.target is torch.flip:
+            attrs["dims"] = jsonable(node_arg(node, 1, "dims"))
+
+        elif node.target is torch.add:
+            attrs["alpha"] = jsonable(node.kwargs.get("alpha", 1))
+
+        elif node.target in {torch.nn.functional.pad, torch._C._nn.pad}:
+            attrs["pad"] = jsonable(node_arg(node, 1, "pad"))
+            attrs["mode"] = jsonable(node_arg(node, 2, "mode", "constant"))
+            attrs["value"] = jsonable(node_arg(node, 3, "value", None))
+
+        elif node.target in {torch.relu, torch.nn.functional.relu}:
+            attrs["inplace"] = jsonable(node.kwargs.get("inplace", False))
 
         elif node.kwargs:
             attrs["kwargs"] = jsonable(node.kwargs)
@@ -158,11 +327,12 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
     return attrs
 
 
-def formula_for(node: fx.Node, label: str, module_label: str | None = None):
+def formula_for(node: fx.Node, label: str, module_label: str | None = None, attrs: dict | None = None):
     name = module_label or label
+    attrs = attrs or {}
 
     if name == "Linear":
-        return "y = xW^T + b"
+        return "y = xW^T + b" if attrs.get("bias", True) else "y = xW^T"
     if name == "Conv1d":
         return "y = conv1d(x, W) + b"
     if name == "Conv2d":

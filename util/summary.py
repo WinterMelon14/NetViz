@@ -144,7 +144,7 @@ def model_summary(
         if attrs:
             info["attrs"] = attrs
 
-        formula = formula_for(node, label=label, module_label=mod_type)
+        formula = formula_for(node, label=label, module_label=mod_type, attrs=attrs)
         if formula is not None:
             info["formula"] = formula
 
