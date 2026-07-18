@@ -34,6 +34,10 @@ def callable_name(target):
     return str(target)
 
 
+def target_matches(target, names):
+    return callable_name(target) in names
+
+
 def module_attrs(module: nn.Module):
     if isinstance(module, nn.Linear):
         return {
@@ -350,9 +354,19 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
             attrs["start"] = jsonable(node_arg(node, 2, "start"))
             attrs["length"] = jsonable(node_arg(node, 3, "length"))
 
-        elif node.target in {"mean", "sum"}:
+        elif node.target in {"mean", "sum", "max", "min", "std", "var", "norm"}:
             attrs["dim"] = jsonable(node_arg(node, 1, "dim"))
             attrs["keepdim"] = jsonable(node_arg(node, 2, "keepdim", False))
+            if node.target == "norm":
+                attrs["p"] = jsonable(node_arg(node, 1, "p", "fro"))
+                attrs["dim"] = jsonable(node_arg(node, 2, "dim"))
+                attrs["keepdim"] = jsonable(node_arg(node, 3, "keepdim", False))
+            elif node.target in {"std", "var"}:
+                attrs["unbiased"] = jsonable(node_arg(node, 2, "unbiased", True))
+                attrs["keepdim"] = jsonable(node_arg(node, 3, "keepdim", False))
+
+        elif node.target == "masked_fill":
+            attrs["value"] = jsonable(node_arg(node, 2, "value"))
 
     elif node.op == "call_function":
         target = callable_name(node.target)
@@ -376,6 +390,42 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
 
         elif node.target is torch.add:
             attrs["alpha"] = jsonable(node.kwargs.get("alpha", 1))
+
+        elif node.target in {torch.clamp, torch.clip} or target == "clamp":
+            attrs["min"] = jsonable(node_arg(node, 1, "min"))
+            attrs["max"] = jsonable(node_arg(node, 2, "max"))
+
+        elif target in {"matmul", "mm", "bmm"}:
+            attrs["operation"] = target
+
+        elif target == "einsum":
+            attrs["equation"] = jsonable(node_arg(node, 0, "equation"))
+
+        elif target in {"sum", "mean", "max", "min", "norm", "std", "var"}:
+            if target == "norm":
+                attrs["p"] = jsonable(node_arg(node, 1, "p", "fro"))
+                attrs["dim"] = jsonable(node_arg(node, 2, "dim"))
+                attrs["keepdim"] = jsonable(node_arg(node, 3, "keepdim", False))
+            else:
+                attrs["dim"] = jsonable(node_arg(node, 1, "dim"))
+                attrs["keepdim"] = jsonable(node_arg(node, 2, "keepdim", False))
+                if target in {"std", "var"}:
+                    attrs["unbiased"] = jsonable(node_arg(node, 2, "unbiased", True))
+                    attrs["keepdim"] = jsonable(node_arg(node, 3, "keepdim", False))
+
+        elif target == "where":
+            attrs["condition"] = "condition"
+
+        elif target == "masked_select":
+            attrs["mask"] = "mask"
+
+        elif target == "interpolate":
+            attrs["size"] = jsonable(node_arg(node, 1, "size"))
+            attrs["scale_factor"] = jsonable(node_arg(node, 2, "scale_factor"))
+            attrs["mode"] = jsonable(node_arg(node, 3, "mode", "nearest"))
+            attrs["align_corners"] = jsonable(node_arg(node, 4, "align_corners"))
+            attrs["recompute_scale_factor"] = jsonable(node_arg(node, 5, "recompute_scale_factor"))
+            attrs["antialias"] = jsonable(node_arg(node, 6, "antialias", False))
 
         elif node.target in {torch.nn.functional.pad, torch._C._nn.pad}:
             attrs["pad"] = jsonable(node_arg(node, 1, "pad"))
@@ -468,8 +518,13 @@ def formula_for(node: fx.Node, label: str, module_label: str | None = None, attr
             return "reduce tensor by mean"
         if node.target == "sum":
             return "reduce tensor by sum"
+        if node.target in {"max", "min", "norm", "std", "var"}:
+            return f"reduce tensor by {node.target}"
+        if node.target == "masked_fill":
+            return "replace masked tensor elements with a fill value"
 
     if node.op == "call_function":
+        target = callable_name(node.target)
         if node.target in {torch.cat, torch.concat}:
             return "concatenate tensors along a dimension"
         if node.target is torch.stack:
@@ -478,7 +533,6 @@ def formula_for(node: fx.Node, label: str, module_label: str | None = None, attr
             return "flatten tensor dimensions"
         if node.target in {torch.relu, torch.nn.functional.relu}:
             return "y = max(0, x)"
-        target = callable_name(node.target)
         if target == "scaled_dot_product_attention":
             return "softmax((QK^T * scale) + mask) V"
         if target == "multi_head_attention_forward":
@@ -493,6 +547,32 @@ def formula_for(node: fx.Node, label: str, module_label: str | None = None, attr
             return "y = a - b"
         if node.target == operator.truediv:
             return "y = a / b"
+        if target == "pow":
+            return "y = x ** exponent"
+        if target == "sqrt":
+            return "y = sqrt(x)"
+        if target == "exp":
+            return "y = exp(x)"
+        if target == "log":
+            return "y = log(x)"
+        if target == "abs":
+            return "y = abs(x)"
+        if target == "neg":
+            return "y = -x"
+        if target == "clamp":
+            return "y = min(max(x, min), max)"
+        if target in {"matmul", "mm", "bmm"}:
+            return "matrix multiplication"
+        if target == "einsum":
+            return "Einstein summation over named dimensions"
+        if target in {"sum", "mean", "max", "min", "norm", "std", "var"}:
+            return f"reduce tensor by {target}"
+        if target == "where":
+            return "select elements from one of two tensors based on a condition"
+        if target == "masked_select":
+            return "select elements where a boolean mask is true"
+        if target == "interpolate":
+            return "resize spatial or temporal dimensions by interpolation"
 
     return None
 

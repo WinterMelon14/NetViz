@@ -12,7 +12,11 @@ def tensor_preview(t: torch.Tensor, max_items=8):
         if flat.numel() == 0:
             return []
 
-        return flat[:max_items].tolist()
+        preview = flat[:max_items]
+        if preview.dtype == torch.bool:
+            return preview.to(torch.int64).tolist()
+
+        return preview.tolist()
 
 
 def tensor_stats(t: torch.Tensor):

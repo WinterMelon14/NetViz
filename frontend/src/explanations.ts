@@ -171,6 +171,23 @@ function optionalNumberAttr(node: TraceNodeForExplanation, key: string) {
   return typeof node.attrs?.[key] === 'number' ? node.attrs[key] as number : null
 }
 
+function normalizeDims(value: unknown, rank: number): number[] | null {
+  if (typeof value === 'number') return [normalizeDim(value, rank)]
+  if (Array.isArray(value)) return value.map((dim) => normalizeDim(Number(dim), rank))
+  return null
+}
+
+function dimListText(dims: number[] | null) {
+  if (!dims) return 'all dimensions'
+  return dims.length === 1 ? `dim=${dims[0]}` : `dims=(${dims.join(', ')})`
+}
+
+function shapesBroadcast(shapeA: number[], shapeB: number[], outputShape: number[]) {
+  return shapeA.length !== outputShape.length
+    || shapeB.length !== outputShape.length
+    || outputShape.some((size, i) => rightAlignedShapeValue(shapeA, outputShape.length, i) !== size || rightAlignedShapeValue(shapeB, outputShape.length, i) !== size)
+}
+
 // ============================================================================
 // Learned Dense And Lookup Layers
 // ============================================================================
@@ -2562,6 +2579,255 @@ function explainAdd(node: TraceNodeForExplanation): Explanation | null {
   }
 }
 
+function explainElementwiseArithmetic(node: TraceNodeForExplanation, title = node.label, symbol = node.label): Explanation | null {
+  const inputs = tensorValues(node.inputs)
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputs.length || !outputShape) return null
+
+  const shapeA = inputs[0]?.shape
+  const shapeB = inputs[1]?.shape
+  if (!shapeA) return null
+
+  const isUnary = !shapeB
+  const broadcasts = shapeB
+    ? shapesBroadcast(shapeA, shapeB, outputShape)
+    : shapeA.length !== outputShape.length || shapeA.some((value, i) => value !== outputShape[i])
+  const min = node.attrs?.min
+  const max = node.attrs?.max
+  const unaryDescription: Record<string, string> = {
+    sqrt: 'takes the square root of each element',
+    exp: 'applies the exponential function to each element',
+    log: 'applies the natural logarithm to each element',
+    abs: 'takes the absolute value of each element',
+    neg: 'negates each element',
+    clamp: 'clips each element to the configured lower and/or upper bound',
+    clip: 'clips each element to the configured lower and/or upper bound',
+  }
+
+  return {
+    title,
+    short: rich(
+      isUnary ? `${title} over ` : `${title} of `,
+      code(shapeText(shapeA)),
+      ...(shapeB ? [' and ', code(shapeText(shapeB))] : []),
+      ' element-wise',
+      ...(broadcasts ? [' with broadcasting'] : [])
+    ),
+    description: isUnary
+      ? rich(code(title), ` ${unaryDescription[title] ?? 'applies an element-wise operation'}.`)
+      : rich(
+          code(title),
+          ' performs an element-wise binary operation. When shapes differ, dimensions of size ',
+          code('1'),
+          ' are broadcast to match the other tensor.',
+        ),
+    formula: {
+      display: isUnary
+        ? title === 'clamp' || title === 'clip'
+          ? `out = clamp(input, min=${String(min ?? '?')}, max=${String(max ?? '?')})`
+          : `out = ${title}(input)`
+        : `out = a ${symbol} b`,
+      substitution: shapeB
+        ? `${shapeText(shapeA)} ${symbol} ${shapeText(shapeB)} âŸ¶ ${shapeText(outputShape)}`
+        : `${shapeText(shapeA)} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      {
+        label: 'Result shape',
+        from: shapeB ? `${shapeText(shapeA)}, ${shapeText(shapeB)}` : shapeText(shapeA),
+        to: shapeText(outputShape),
+        reason: broadcasts
+          ? 'Dimensions of size 1 (or missing leading dimensions) are broadcast to match the larger shape.'
+          : isUnary ? noChange : 'Shapes already match; no broadcasting needed.',
+      },
+    ],
+  }
+}
+
+function explainMatrixMultiplication(node: TraceNodeForExplanation): Explanation | null {
+  const inputs = tensorValues(node.inputs)
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  const left = inputs[0]?.shape
+  const right = inputs[1]?.shape
+  if (!left || !right || !outputShape) return null
+
+  const equation = typeof node.attrs?.equation === 'string' ? node.attrs.equation : null
+  const leftContract = left.at(-1)
+  const rightContract = right.length >= 2 ? right.at(-2) : right.at(-1)
+
+  return {
+    title: node.label,
+    short: node.label === 'einsum'
+      ? rich('Combines tensors using Einstein summation')
+      : rich('Matrix multiplication from ', code(shapeText(left)), ' and ', code(shapeText(right))),
+    description: rich(
+      code(node.label),
+      node.label === 'einsum'
+        ? ' applies an equation that names input and output dimensions explicitly. Dimensions repeated across inputs are multiplied and summed over unless they appear in the output.'
+        : ' multiplies matrices or batches of matrices. The inner dimensions must match, and leading batch dimensions follow PyTorch broadcasting rules.',
+    ),
+    formula: {
+      display: equation ? `out = einsum("${equation}", inputs...)` : 'out[..., i, j] = sum_k left[..., i, k] * right[..., k, j]',
+      substitution: equation
+        ? `${equation}: ${inputs.map((input) => shapeText(input.shape)).join(', ')} âŸ¶ ${shapeText(outputShape)}`
+        : `${shapeText(left)} x ${shapeText(right)} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      {
+        label: 'Contracted dimension',
+        from: `${leftContract} and ${rightContract}`,
+        to: 'summed out',
+        reason: node.label === 'einsum' ? 'The equation determines which dimensions are contracted.' : 'The last dimension of the left input multiplies the second-to-last dimension of the right input.',
+      },
+      {
+        label: 'Output shape',
+        from: `${shapeText(left)}, ${shapeText(right)}`,
+        to: shapeText(outputShape),
+        reason: node.label === 'bmm' ? 'Batch matrix multiplication preserves the batch dimension.' : 'Matrix multiplication keeps the outer matrix dimensions and broadcasts leading batch dimensions when present.',
+      },
+    ],
+  }
+}
+
+function explainReduction(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const dims = normalizeDims(node.attrs?.dim, inputShape.length)
+  const keepdim = node.attrs?.keepdim === true
+  const dimText = dimListText(dims)
+  const p = node.attrs?.p
+  const unbiased = node.attrs?.unbiased
+
+  return {
+    title: node.label,
+    short: rich('Reduces ', code(shapeText(inputShape)), ' over ', code(dimText), ' to ', code(shapeText(outputShape))),
+    description: rich(
+      code(node.label),
+      ` computes a ${node.label} reduction over ${dimText}.`,
+      keepdim ? ' Reduced dimensions are retained with size 1.' : ' Reduced dimensions are removed.',
+      ...(node.label === 'norm' && p !== undefined ? [' Norm order is ', code(String(p)), '.'] : []),
+      ...((node.label === 'std' || node.label === 'var') && unbiased !== undefined ? [' Uses ', code(`unbiased=${unbiased}`), '.'] : []),
+    ),
+    formula: {
+      display: `out = ${node.label}(input, ${dimText}, keepdim=${keepdim})`,
+      substitution: `${shapeText(inputShape)} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      {
+        label: 'Reduced dimensions',
+        from: dims ? dims.map((dim) => `dim ${dim} (size ${inputShape[dim]})`).join(', ') : 'all dimensions',
+        to: keepdim ? 'size 1' : 'removed',
+        reason: keepdim ? 'keepdim preserves each reduced axis as size 1.' : 'Reduced axes are collapsed out of the result.',
+      },
+    ],
+  }
+}
+
+function explainWhere(node: TraceNodeForExplanation): Explanation | null {
+  const inputs = tensorValues(node.inputs)
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  const firstDataShape = inputs[0]?.shape
+  const secondDataShape = inputs[1]?.shape
+  if (!firstDataShape || !outputShape) return null
+
+  return {
+    title: 'where',
+    short: rich('Selects values element-wise based on a boolean condition'),
+    description: rich(
+      code('where'),
+      ' chooses each output element from one tensor when the condition is true and from the other tensor when the condition is false. The condition and data tensors follow broadcasting rules.',
+    ),
+    formula: {
+      display: 'out = condition ? x : y',
+      substitution: `${shapeText(firstDataShape)}${secondDataShape ? `, ${shapeText(secondDataShape)}` : ''} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      { label: 'Result shape', from: secondDataShape ? `${shapeText(firstDataShape)}, ${shapeText(secondDataShape)}` : shapeText(firstDataShape), to: shapeText(outputShape), reason: 'The condition and selected tensors broadcast to the result shape.' },
+    ],
+  }
+}
+
+function explainMaskedFill(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  return {
+    title: 'masked_fill',
+    short: rich('Replaces masked elements while preserving shape'),
+    description: rich(
+      code('masked_fill'),
+      ' returns a tensor where positions selected by a boolean mask are replaced with a scalar fill value. Unmasked positions keep their original values.',
+    ),
+    formula: {
+      display: `out = mask ? ${String(node.attrs?.value ?? 'value')} : input`,
+      substitution: `${shapeText(inputShape)} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: noChange },
+    ],
+  }
+}
+
+function explainMaskedSelect(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  return {
+    title: 'masked_select',
+    short: rich('Extracts elements selected by a boolean mask'),
+    description: rich(
+      code('masked_select'),
+      ' returns a one-dimensional tensor containing the input elements where the boolean mask is true. The number of output elements depends on the runtime mask values.',
+    ),
+    formula: {
+      display: 'out = input[mask]',
+      substitution: `${shapeText(inputShape)} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      { label: 'Selected elements', from: shapeText(inputShape), to: shapeText(outputShape), reason: 'The result is flattened to the elements selected by the mask.' },
+    ],
+  }
+}
+
+function explainInterpolate(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const mode = String(node.attrs?.mode ?? 'unknown')
+  const size = node.attrs?.size
+  const scaleFactor = node.attrs?.scale_factor
+  const alignCorners = node.attrs?.align_corners
+  const antialias = node.attrs?.antialias
+  const spatialIn = inputShape.slice(2)
+  const spatialOut = outputShape.slice(2)
+
+  return {
+    title: 'interpolate',
+    short: rich('Resizes spatial dimensions from ', code(shapeText(spatialIn)), ' to ', code(shapeText(spatialOut))),
+    description: rich(
+      code('interpolate'),
+      ' resizes the spatial or temporal dimensions of a tensor using ',
+      code(mode),
+      ' interpolation. Batch and channel dimensions are preserved.',
+      ...(alignCorners !== undefined && alignCorners !== null ? [' ', code(`align_corners=${alignCorners}`), ' affects how grid points are aligned.'] : []),
+      ...(antialias ? [' Antialiasing is enabled for supported modes.'] : []),
+    ),
+    formula: {
+      display: 'out = interpolate(input, size or scale_factor, mode)',
+      substitution: `${shapeText(inputShape)} âŸ¶ ${shapeText(outputShape)}; size=${JSON.stringify(size ?? null)}, scale_factor=${JSON.stringify(scaleFactor ?? null)}`,
+    },
+    shapeSteps: [
+      { label: 'Batch and channels', from: shapeText(inputShape.slice(0, 2)), to: shapeText(outputShape.slice(0, 2)), reason: 'Interpolation preserves leading batch and channel dimensions.' },
+      { label: 'Spatial dimensions', from: shapeText(spatialIn), to: shapeText(spatialOut), reason: 'The requested size or scale factor determines the resized dimensions.' },
+    ],
+  }
+}
+
 // ============================================================================
 // Padding And Boundary Operations
 // ============================================================================
@@ -3030,6 +3296,37 @@ const tensorOperationExplanations: ExplanationMatcher[] = [
   { labels: ['add', 'Add'], explain: explainAdd },
 ]
 
+const elementwiseArithmeticExplanations: ExplanationMatcher[] = [
+  { labels: ['sub'], explain: (node) => explainElementwiseArithmetic(node, 'sub', '-') },
+  { labels: ['mul'], explain: (node) => explainElementwiseArithmetic(node, 'mul', '*') },
+  { labels: ['truediv', 'div'], explain: (node) => explainElementwiseArithmetic(node, 'div', '/') },
+  { labels: ['pow'], explain: (node) => explainElementwiseArithmetic(node, 'pow', '**') },
+  { labels: ['sqrt'], explain: (node) => explainElementwiseArithmetic(node, 'sqrt') },
+  { labels: ['exp'], explain: (node) => explainElementwiseArithmetic(node, 'exp') },
+  { labels: ['log'], explain: (node) => explainElementwiseArithmetic(node, 'log') },
+  { labels: ['abs'], explain: (node) => explainElementwiseArithmetic(node, 'abs') },
+  { labels: ['neg'], explain: (node) => explainElementwiseArithmetic(node, 'neg') },
+  { labels: ['clamp', 'clip'], explain: (node) => explainElementwiseArithmetic(node, node.label) },
+]
+
+const matrixMultiplicationExplanations: ExplanationMatcher[] = [
+  { labels: ['matmul', 'mm', 'bmm', 'einsum'], explain: explainMatrixMultiplication },
+]
+
+const reductionExplanations: ExplanationMatcher[] = [
+  { labels: ['sum', 'mean', 'max', 'min', 'norm', 'std', 'var'], explain: explainReduction },
+]
+
+const conditionalMaskingExplanations: ExplanationMatcher[] = [
+  { labels: ['where'], explain: explainWhere },
+  { labels: ['masked_fill'], explain: explainMaskedFill },
+  { labels: ['masked_select'], explain: explainMaskedSelect },
+]
+
+const resizingExplanations: ExplanationMatcher[] = [
+  { labels: ['interpolate'], explain: explainInterpolate },
+]
+
 const paddingExplanations: ExplanationMatcher[] = [
   { labels: ['pad'], explain: explainPad },
 ]
@@ -3073,6 +3370,11 @@ const explanationGroups: ExplanationMatcher[][] = [
   attentionExplanations,
   shapeTransformExplanations,
   tensorOperationExplanations,
+  elementwiseArithmeticExplanations,
+  matrixMultiplicationExplanations,
+  reductionExplanations,
+  conditionalMaskingExplanations,
+  resizingExplanations,
   paddingExplanations,
 ]
 

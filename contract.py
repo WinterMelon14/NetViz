@@ -563,7 +563,7 @@ class MetadataContractModel(nn.Module):
         )
 
         # ------------------------------------------------------------------
-        # Arithmetic
+        # Element-wise arithmetic
         # ------------------------------------------------------------------
         relu_padding = F.pad(
             functional_relu,
@@ -580,6 +580,28 @@ class MetadataContractModel(nn.Module):
         multiplied = vector * 1.5
         subtracted = vector - 0.25
         divided = vector / 2.0
+        powered = torch.pow(vector.abs() + 1.0, 2.0)
+        square_rooted = torch.sqrt(vector.abs() + 1.0)
+        exponentiated = torch.exp(vector)
+        logged = torch.log(vector.abs() + 1.0)
+        absolute = torch.abs(vector)
+        negated = torch.neg(vector)
+        clamped = torch.clamp(vector, min=-0.5, max=0.5)
+
+        # ------------------------------------------------------------------
+        # Matrix multiplication
+        # ------------------------------------------------------------------
+
+        mat_left = x[:, :3, :4, 0]                 # [2, 3, 4]
+        mat_right = x[:, :4, :5, 1]                # [2, 4, 5]
+        matrix_multiplied = torch.matmul(mat_left, mat_right)
+        mm_multiplied = torch.mm(mat_left[0], mat_right[0])
+        bmm_multiplied = torch.bmm(mat_left, mat_right)
+        einsum_multiplied = torch.einsum(
+            "bij,bjk->bik",
+            mat_left,
+            mat_right,
+        )
 
         # ------------------------------------------------------------------
         # Padding and reductions
@@ -600,6 +622,58 @@ class MetadataContractModel(nn.Module):
         reduced_sum = x.sum(
             dim=1,
             keepdim=False,
+        )
+        reduced_max = torch.max(
+            x,
+            dim=-1,
+            keepdim=False,
+        ).values
+        reduced_min = x.min(
+            dim=1,
+            keepdim=True,
+        ).values
+        reduced_norm = torch.norm(
+            x,
+            p=2,
+            dim=-1,
+            keepdim=True,
+        )
+        reduced_std = torch.std(
+            x,
+            dim=-1,
+            keepdim=False,
+            unbiased=False,
+        )
+        reduced_var = torch.var(
+            x,
+            dim=-1,
+            keepdim=True,
+            unbiased=False,
+        )
+
+        # ------------------------------------------------------------------
+        # Conditional and masking operations
+        # ------------------------------------------------------------------
+
+        conditioned = torch.where(vector > 0, vector, -vector)
+        mask_filled = vector.masked_fill(
+            vector > 0,
+            0.5,
+        )
+        mask_selected = torch.masked_select(
+            vector,
+            vector > 0,
+        )
+
+        # ------------------------------------------------------------------
+        # Resizing
+        # ------------------------------------------------------------------
+
+        interpolated = F.interpolate(
+            x,
+            size=(7, 9),
+            mode="bilinear",
+            align_corners=False,
         )
 
         # Returning every result prevents future optimization passes from
@@ -693,9 +767,29 @@ class MetadataContractModel(nn.Module):
             "multiplied": multiplied,
             "subtracted": subtracted,
             "divided": divided,
+            "powered": powered,
+            "square_rooted": square_rooted,
+            "exponentiated": exponentiated,
+            "logged": logged,
+            "absolute": absolute,
+            "negated": negated,
+            "clamped": clamped,
+            "matrix_multiplied": matrix_multiplied,
+            "mm_multiplied": mm_multiplied,
+            "bmm_multiplied": bmm_multiplied,
+            "einsum_multiplied": einsum_multiplied,
             "padded": padded,
             "reduced_mean": reduced_mean,
             "reduced_sum": reduced_sum,
+            "reduced_max": reduced_max,
+            "reduced_min": reduced_min,
+            "reduced_norm": reduced_norm,
+            "reduced_std": reduced_std,
+            "reduced_var": reduced_var,
+            "conditioned": conditioned,
+            "mask_filled": mask_filled,
+            "mask_selected": mask_selected,
+            "interpolated": interpolated,
         }
 
 
