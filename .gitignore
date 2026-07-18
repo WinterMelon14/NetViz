@@ -18,7 +18,7 @@ dist/
 .agents/
 .codex/
 *.local
-*.md
+docs/
 # Logs
 logs/
 *.log
