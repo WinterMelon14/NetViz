@@ -283,6 +283,63 @@ class MetadataContractModel(nn.Module):
             end_dim=3,
         )
 
+        # ------------------------------------------------------------------
+        # Attention and Transformer blocks
+        # ------------------------------------------------------------------
+
+        self.multihead_attention = nn.MultiheadAttention(
+            embed_dim=8,
+            num_heads=2,
+            dropout=0.20,
+            bias=False,
+            add_zero_attn=True,
+            batch_first=True,
+        )
+
+        self.transformer_encoder_layer = nn.TransformerEncoderLayer(
+            d_model=8,
+            nhead=2,
+            dim_feedforward=16,
+            dropout=0.30,
+            batch_first=True,
+            norm_first=True,
+            bias=False,
+        )
+
+        self.transformer_decoder_layer = nn.TransformerDecoderLayer(
+            d_model=8,
+            nhead=2,
+            dim_feedforward=20,
+            dropout=0.40,
+            batch_first=True,
+            norm_first=True,
+            bias=False,
+        )
+
+        encoder_stack_layer = nn.TransformerEncoderLayer(
+            d_model=8,
+            nhead=2,
+            dim_feedforward=12,
+            dropout=0.10,
+            batch_first=True,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_stack_layer,
+            num_layers=2,
+        )
+
+        decoder_stack_layer = nn.TransformerDecoderLayer(
+            d_model=8,
+            nhead=2,
+            dim_feedforward=12,
+            dropout=0.10,
+            batch_first=True,
+        )
+        self.transformer_decoder = nn.TransformerDecoder(
+            decoder_stack_layer,
+            num_layers=2,
+        )
+
     def forward(
         self,
         x: torch.Tensor,
@@ -414,6 +471,44 @@ class MetadataContractModel(nn.Module):
 
         contiguous = permuted.contiguous(
             memory_format=torch.contiguous_format
+        )
+
+        # ------------------------------------------------------------------
+        # Attention and Transformer blocks
+        # ------------------------------------------------------------------
+
+        attention_input = x.mean(dim=2)             # [2, 4, 8]
+        attention_memory = x.mean(dim=3)            # [2, 4, 8]
+
+        multihead_attention, multihead_weights = self.multihead_attention(
+            attention_input,
+            attention_input,
+            attention_input,
+            need_weights=False,
+            average_attn_weights=False,
+            is_causal=False,
+        )
+
+        attention_qkv = attention_input.view(2, 2, 4, 4)
+        scaled_dot_product_attention = F.scaled_dot_product_attention(
+            attention_qkv,
+            attention_qkv,
+            attention_qkv,
+            dropout_p=0.0,
+            is_causal=False,
+        )
+
+        transformer_encoder_layer = self.transformer_encoder_layer(
+            attention_input
+        )
+        transformer_decoder_layer = self.transformer_decoder_layer(
+            attention_input,
+            attention_memory,
+        )
+        transformer_encoder = self.transformer_encoder(attention_input)
+        transformer_decoder = self.transformer_decoder(
+            attention_input,
+            attention_memory,
         )
 
         # ------------------------------------------------------------------
@@ -574,6 +669,14 @@ class MetadataContractModel(nn.Module):
             "unsqueezed": unsqueezed,
             "expanded": expanded,
             "contiguous": contiguous,
+
+            "multihead_attention": multihead_attention,
+            "multihead_weights": multihead_weights,
+            "scaled_dot_product_attention": scaled_dot_product_attention,
+            "transformer_encoder_layer": transformer_encoder_layer,
+            "transformer_decoder_layer": transformer_decoder_layer,
+            "transformer_encoder": transformer_encoder,
+            "transformer_decoder": transformer_decoder,
 
             "chunked": chunked,
             "split": split,

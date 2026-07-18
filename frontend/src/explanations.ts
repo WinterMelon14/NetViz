@@ -163,6 +163,14 @@ function affineFormula(base: string, node: TraceNodeForExplanation, defaultAffin
   return `${base} * weight + bias`
 }
 
+function optionalBoolAttr(node: TraceNodeForExplanation, key: string) {
+  return typeof node.attrs?.[key] === 'boolean' ? node.attrs[key] as boolean : null
+}
+
+function optionalNumberAttr(node: TraceNodeForExplanation, key: string) {
+  return typeof node.attrs?.[key] === 'number' ? node.attrs[key] as number : null
+}
+
 // ============================================================================
 // Learned Dense And Lookup Layers
 // ============================================================================
@@ -2636,6 +2644,268 @@ function explainPad(node: TraceNodeForExplanation): Explanation | null {
 }
 
 // ============================================================================
+// Attention And Transformer Blocks
+// ============================================================================
+
+function explainMultiheadAttention(node: TraceNodeForExplanation): Explanation | null {
+  const inputs = tensorValues(node.inputs)
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  const queryShape = inputs[0]?.shape
+  if (!queryShape || !outputShape) return null
+
+  const embedDim = optionalNumberAttr(node, 'embed_dim') ?? queryShape.at(-1) ?? outputShape.at(-1)
+  const numHeads = optionalNumberAttr(node, 'num_heads')
+  const dropout = optionalNumberAttr(node, 'dropout')
+  const batchFirst = optionalBoolAttr(node, 'batch_first')
+  const addZeroAttn = optionalBoolAttr(node, 'add_zero_attn')
+  const hasBias = optionalBoolAttr(node, 'bias')
+  const headDim = numHeads && embedDim ? embedDim / numHeads : null
+
+  return {
+    title: 'MultiheadAttention',
+    short: rich(
+      'Runs scaled dot-product attention',
+      ...(numHeads ? [' with ', code(`${numHeads}`), ' heads'] : []),
+      ...(embedDim ? [' over embedding size ', code(`${embedDim}`)] : []),
+    ),
+    description: rich(
+      code('MultiheadAttention'),
+      ' projects the input into query, key, and value tensors, splits them across attention heads, computes attention weights from ',
+      code('QK^T'),
+      ', applies those weights to ',
+      code('V'),
+      ', then combines the heads with an output projection.',
+      ...(batchFirst !== null ? [' This module is configured with ', code(`batch_first=${batchFirst}`), '.'] : []),
+      ...(dropout !== null ? [' Attention dropout is ', code(`${dropout}`), '.'] : []),
+      ...(addZeroAttn ? [' A zero-attention slot is appended to key and value.'] : []),
+      ...(hasBias === false ? [' Projection biases are disabled.'] : []),
+    ),
+    formula: {
+      display: 'Attention(Q,K,V) = softmax(QK^T / sqrt(d_head) + mask) V',
+      substitution: headDim ? `head_dim = embed_dim / num_heads = ${embedDim} / ${numHeads} = ${headDim}` : undefined,
+    },
+    shapeSteps: [
+      { label: 'Query shape', from: shapeText(queryShape), to: shapeText(outputShape), reason: 'The attention output follows the query batch and sequence dimensions.' },
+      ...(numHeads && embedDim
+        ? [{ label: 'Heads', from: embedDim, to: `${numHeads} x ${headDim}`, reason: 'The embedding dimension is split across attention heads internally.' }]
+        : []),
+    ],
+  }
+}
+
+function explainScaledDotProductAttention(node: TraceNodeForExplanation): Explanation | null {
+  const inputs = tensorValues(node.inputs)
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  const queryShape = inputs[0]?.shape
+  const keyShape = inputs[1]?.shape
+  const valueShape = inputs[2]?.shape
+  if (!queryShape || !outputShape) return null
+
+  const dropout = optionalNumberAttr(node, 'dropout_p')
+  const isCausal = optionalBoolAttr(node, 'is_causal')
+  const hasMask = optionalBoolAttr(node, 'has_attn_mask')
+  const enableGqa = optionalBoolAttr(node, 'enable_gqa')
+  const scale = node.attrs?.scale
+  const headDim = queryShape.at(-1)
+  const defaultScale = typeof headDim === 'number' ? `1 / sqrt(${headDim})` : '1 / sqrt(d_head)'
+
+  return {
+    title: 'scaled_dot_product_attention',
+    short: rich(
+      'Computes attention weights from ',
+      code('QK^T'),
+      ' and applies them to ',
+      code('V'),
+    ),
+    description: rich(
+      code('scaled_dot_product_attention'),
+      ' computes scaled dot-product attention directly from query, key, and value tensors. It forms attention logits from ',
+      code('QK^T'),
+      ', applies scale and any mask, normalizes with ',
+      code('softmax'),
+      ', then multiplies by the value tensor.',
+      ...(isCausal ? [' Causal masking prevents each position from attending to future positions.'] : []),
+      ...(hasMask ? [' An attention mask is applied before softmax.'] : []),
+      ...(enableGqa ? [' Grouped-query attention is enabled, so key/value heads may be shared across query heads.'] : []),
+      ...(dropout !== null ? [' Attention dropout probability is ', code(`${dropout}`), '.'] : []),
+    ),
+    formula: {
+      display: 'out = softmax((QK^T * scale) + mask) V',
+      substitution: `scale=${scale ?? defaultScale}; Q=${shapeText(queryShape)}${keyShape ? `, K=${shapeText(keyShape)}` : ''}${valueShape ? `, V=${shapeText(valueShape)}` : ''}`,
+    },
+    shapeSteps: [
+      { label: 'Output shape', from: shapeText(queryShape), to: shapeText(outputShape), reason: 'Output preserves the query batch, head, and target-length dimensions, with the value embedding dimension.' },
+    ],
+  }
+}
+
+function explainMultiHeadAttentionForward(node: TraceNodeForExplanation): Explanation | null {
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  const queryShape = tensorValues(node.inputs)[0]?.shape
+  if (!queryShape || !outputShape) return null
+
+  const embedDim = optionalNumberAttr(node, 'embed_dim') ?? queryShape.at(-1)
+  const numHeads = optionalNumberAttr(node, 'num_heads')
+  const dropout = optionalNumberAttr(node, 'dropout_p')
+  const training = optionalBoolAttr(node, 'training')
+  const needWeights = optionalBoolAttr(node, 'need_weights')
+  const isCausal = optionalBoolAttr(node, 'is_causal')
+  const hasMask = optionalBoolAttr(node, 'has_attn_mask')
+  const hasKeyPaddingMask = optionalBoolAttr(node, 'has_key_padding_mask')
+  const headDim = numHeads && embedDim ? embedDim / numHeads : null
+
+  return {
+    title: 'multi_head_attention_forward',
+    short: rich(
+      'Functional multi-head attention',
+      ...(numHeads ? [' with ', code(`${numHeads}`), ' heads'] : []),
+    ),
+    description: rich(
+      code('multi_head_attention_forward'),
+      ' is PyTorch’s functional implementation behind many multi-head attention modules. It projects query, key, and value, runs scaled dot-product attention per head, applies the output projection, and can optionally return attention weights.',
+      ...(training !== null ? [' It ran with ', code(`training=${training}`), '.'] : []),
+      ...(dropout !== null ? [' Dropout probability is ', code(`${dropout}`), '.'] : []),
+      ...(needWeights === false ? [' Attention weights were not requested.'] : []),
+      ...(isCausal ? [' Causal masking is enabled.'] : []),
+      ...(hasMask ? [' An attention mask is present.'] : []),
+      ...(hasKeyPaddingMask ? [' A key padding mask is present.'] : []),
+    ),
+    formula: {
+      display: 'project Q/K/V -> scaled dot-product attention -> output projection',
+      substitution: headDim ? `head_dim = ${embedDim} / ${numHeads} = ${headDim}` : undefined,
+    },
+    shapeSteps: [
+      { label: 'Output shape', from: shapeText(queryShape), to: shapeText(outputShape), reason: 'The attention output follows the query sequence and embedding dimensions.' },
+    ],
+  }
+}
+
+function explainOptimizedAttentionKernel(node: TraceNodeForExplanation): Explanation | null {
+  const queryShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!queryShape && !outputShape) return null
+
+  return {
+    title: node.label,
+    short: rich('Optimized scaled dot-product attention kernel'),
+    description: rich(
+      code(node.label),
+      ' is a lower-level optimized attention kernel used to compute scaled dot-product attention more efficiently. It has the same high-level semantics as attention over ',
+      code('Q'),
+      ', ',
+      code('K'),
+      ', and ',
+      code('V'),
+      ', but may avoid materializing the full attention matrix.',
+    ),
+    formula: {
+      display: 'out = softmax((QK^T * scale) + mask) V',
+      substitution: `${shapeText(queryShape)} âŸ¶ ${shapeText(outputShape ?? queryShape)}`,
+    },
+    shapeSteps: [
+      { label: 'Output shape', from: shapeText(queryShape), to: shapeText(outputShape ?? queryShape), reason: 'The optimized kernel preserves scaled dot-product attention output semantics.' },
+    ],
+  }
+}
+
+function explainTransformerEncoderLayer(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const dModel = optionalNumberAttr(node, 'd_model') ?? inputShape.at(-1)
+  const nhead = optionalNumberAttr(node, 'nhead')
+  const dimFeedforward = optionalNumberAttr(node, 'dim_feedforward')
+  const normFirst = optionalBoolAttr(node, 'norm_first')
+  const dropout = optionalNumberAttr(node, 'dropout')
+
+  return {
+    title: 'TransformerEncoderLayer',
+    short: rich(
+      'Encoder block with self-attention and feed-forward layers',
+      ...(nhead ? [' using ', code(`${nhead}`), ' heads'] : []),
+    ),
+    description: rich(
+      code('TransformerEncoderLayer'),
+      ' applies multi-head self-attention, a position-wise feed-forward network, residual connections, dropout, and layer normalization.',
+      ...(normFirst !== null ? [' LayerNorm order is ', code(normFirst ? 'pre-norm' : 'post-norm'), '.'] : []),
+      ...(dropout !== null ? [' Dropout probability is ', code(`${dropout}`), '.'] : []),
+    ),
+    formula: {
+      display: normFirst ? 'x = x + self_attn(norm(x)); out = x + ffn(norm(x))' : 'x = norm(x + self_attn(x)); out = norm(x + ffn(x))',
+      substitution: `d_model=${dModel ?? '?'}, nhead=${nhead ?? '?'}, dim_feedforward=${dimFeedforward ?? '?'}`,
+    },
+    shapeSteps: [
+      { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: 'Transformer encoder layers preserve the batch, sequence, and model dimensions.' },
+    ],
+  }
+}
+
+function explainTransformerDecoderLayer(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const memoryShape = tensorValues(node.inputs)[1]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const dModel = optionalNumberAttr(node, 'd_model') ?? inputShape.at(-1)
+  const nhead = optionalNumberAttr(node, 'nhead')
+  const dimFeedforward = optionalNumberAttr(node, 'dim_feedforward')
+  const normFirst = optionalBoolAttr(node, 'norm_first')
+
+  return {
+    title: 'TransformerDecoderLayer',
+    short: rich(
+      'Decoder block with self-attention, cross-attention, and feed-forward layers',
+      ...(nhead ? [' using ', code(`${nhead}`), ' heads'] : []),
+    ),
+    description: rich(
+      code('TransformerDecoderLayer'),
+      ' applies target self-attention, encoder-memory cross-attention, a position-wise feed-forward network, residual connections, dropout, and layer normalization.',
+      ...(normFirst !== null ? [' LayerNorm order is ', code(normFirst ? 'pre-norm' : 'post-norm'), '.'] : []),
+    ),
+    formula: {
+      display: normFirst ? 'tgt + self_attn; + cross_attn(memory); + ffn' : 'norm after self_attn, cross_attn, and ffn residual blocks',
+      substitution: `target=${shapeText(inputShape)}${memoryShape ? `, memory=${shapeText(memoryShape)}` : ''}, d_model=${dModel ?? '?'}, nhead=${nhead ?? '?'}, dim_feedforward=${dimFeedforward ?? '?'}`,
+    },
+    shapeSteps: [
+      { label: 'Target shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: 'Transformer decoder layers preserve the target batch, sequence, and model dimensions.' },
+    ],
+  }
+}
+
+function explainTransformerStack(node: TraceNodeForExplanation): Explanation | null {
+  const inputShape = tensorValues(node.inputs)[0]?.shape
+  const outputShape = tensorValues(node.outputs)[0]?.shape
+  if (!inputShape || !outputShape) return null
+
+  const numLayers = optionalNumberAttr(node, 'num_layers')
+  const hasNorm = optionalBoolAttr(node, 'has_norm')
+  const isDecoder = node.label === 'TransformerDecoder'
+
+  return {
+    title: node.label,
+    short: rich(
+      isDecoder ? 'Stack of Transformer decoder layers' : 'Stack of Transformer encoder layers',
+      ...(numLayers !== null ? [' with ', code(`${numLayers}`), ' layers'] : []),
+    ),
+    description: rich(
+      code(node.label),
+      isDecoder
+        ? ' applies multiple decoder layers in sequence, combining target self-attention, cross-attention over memory, and feed-forward blocks.'
+        : ' applies multiple encoder layers in sequence, combining self-attention and feed-forward blocks.',
+      ...(hasNorm ? [' A final normalization layer is applied after the stack.'] : []),
+    ),
+    formula: {
+      display: isDecoder ? 'out = decoder_layers(tgt, memory)' : 'out = encoder_layers(src)',
+      substitution: `${shapeText(inputShape)} âŸ¶ ${shapeText(outputShape)}`,
+    },
+    shapeSteps: [
+      { label: 'Shape', from: shapeText(inputShape), to: shapeText(outputShape), reason: 'Transformer stacks preserve the model dimension and normally preserve the driving sequence length.' },
+    ],
+  }
+}
+
+// ============================================================================
 // Fallback Explanation
 // ============================================================================
 
@@ -2764,6 +3034,35 @@ const paddingExplanations: ExplanationMatcher[] = [
   { labels: ['pad'], explain: explainPad },
 ]
 
+const attentionExplanations: ExplanationMatcher[] = [
+  { labels: ['MultiheadAttention'], explain: explainMultiheadAttention },
+  { labels: ['scaled_dot_product_attention'], explain: explainScaledDotProductAttention },
+  { labels: ['multi_head_attention_forward'], explain: explainMultiHeadAttentionForward },
+  {
+    labels: [
+      '_native_multi_head_attention',
+      '_scaled_dot_product_flash_attention',
+      '_scaled_dot_product_flash_attention.default',
+      '_scaled_dot_product_flash_attention_for_cpu',
+      '_scaled_dot_product_flash_attention_for_cpu.default',
+      '_scaled_dot_product_efficient_attention',
+      '_scaled_dot_product_efficient_attention.default',
+      '_scaled_dot_product_cudnn_attention',
+      '_scaled_dot_product_cudnn_attention.default',
+      '_scaled_dot_product_fused_attention_overrideable',
+      '_scaled_dot_product_fused_attention_overrideable.default',
+      '_flash_attention_forward',
+      '_flash_attention_forward.default',
+      '_efficient_attention_forward',
+      '_efficient_attention_forward.default',
+    ],
+    explain: explainOptimizedAttentionKernel,
+  },
+  { labels: ['TransformerEncoderLayer'], explain: explainTransformerEncoderLayer },
+  { labels: ['TransformerDecoderLayer'], explain: explainTransformerDecoderLayer },
+  { labels: ['TransformerEncoder', 'TransformerDecoder'], explain: explainTransformerStack },
+]
+
 const explanationGroups: ExplanationMatcher[][] = [
   learnedLayerExplanations,
   convolutionExplanations,
@@ -2771,6 +3070,7 @@ const explanationGroups: ExplanationMatcher[][] = [
   normalizationExplanations,
   activationExplanations,
   regularizationExplanations,
+  attentionExplanations,
   shapeTransformExplanations,
   tensorOperationExplanations,
   paddingExplanations,

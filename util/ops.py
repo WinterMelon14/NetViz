@@ -26,6 +26,14 @@ def module_bias(module: nn.Module):
     return getattr(module, "bias", None) is not None
 
 
+def callable_name(target):
+    if isinstance(target, str):
+        return target
+    if hasattr(target, "__name__"):
+        return target.__name__
+    return str(target)
+
+
 def module_attrs(module: nn.Module):
     if isinstance(module, nn.Linear):
         return {
@@ -232,6 +240,60 @@ def module_attrs(module: nn.Module):
             "end_dim": module.end_dim,
         }
 
+    if isinstance(module, nn.MultiheadAttention):
+        return {
+            "embed_dim": module.embed_dim,
+            "num_heads": module.num_heads,
+            "dropout": module.dropout,
+            "batch_first": module.batch_first,
+            "bias": module.in_proj_bias is not None,
+            "add_bias_kv": module.bias_k is not None and module.bias_v is not None,
+            "add_zero_attn": module.add_zero_attn,
+            "kdim": module.kdim,
+            "vdim": module.vdim,
+            "training": module.training,
+        }
+
+    if isinstance(module, nn.TransformerEncoderLayer):
+        return {
+            "d_model": module.self_attn.embed_dim,
+            "nhead": module.self_attn.num_heads,
+            "dim_feedforward": module.linear1.out_features,
+            "dropout": module.dropout.p,
+            "activation": callable_name(module.activation),
+            "batch_first": module.self_attn.batch_first,
+            "norm_first": module.norm_first,
+            "layer_norm_eps": module.norm1.eps,
+            "bias": module.linear1.bias is not None,
+            "training": module.training,
+        }
+
+    if isinstance(module, nn.TransformerDecoderLayer):
+        return {
+            "d_model": module.self_attn.embed_dim,
+            "nhead": module.self_attn.num_heads,
+            "dim_feedforward": module.linear1.out_features,
+            "dropout": module.dropout.p,
+            "activation": callable_name(module.activation),
+            "batch_first": module.self_attn.batch_first,
+            "norm_first": module.norm_first,
+            "layer_norm_eps": module.norm1.eps,
+            "bias": module.linear1.bias is not None,
+            "training": module.training,
+        }
+
+    if isinstance(module, nn.TransformerEncoder):
+        return {
+            "num_layers": len(module.layers),
+            "has_norm": module.norm is not None,
+        }
+
+    if isinstance(module, nn.TransformerDecoder):
+        return {
+            "num_layers": len(module.layers),
+            "has_norm": module.norm is not None,
+        }
+
     return {}
 
 
@@ -293,6 +355,8 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
             attrs["keepdim"] = jsonable(node_arg(node, 2, "keepdim", False))
 
     elif node.op == "call_function":
+        target = callable_name(node.target)
+
         if node.target in {torch.cat, torch.concat}:
             attrs["dim"] = jsonable(node_arg(node, 1, "dim", 0))
 
@@ -320,6 +384,29 @@ def attrs_for_node(node: fx.Node, runtime_output=None):
 
         elif node.target in {torch.relu, torch.nn.functional.relu}:
             attrs["inplace"] = jsonable(node.kwargs.get("inplace", False))
+
+        elif target == "scaled_dot_product_attention":
+            attrs["dropout_p"] = jsonable(node_arg(node, 4, "dropout_p", 0.0))
+            attrs["is_causal"] = jsonable(node_arg(node, 5, "is_causal", False))
+            attrs["scale"] = jsonable(node.kwargs.get("scale"))
+            attrs["enable_gqa"] = jsonable(node.kwargs.get("enable_gqa", False))
+            attrs["has_attn_mask"] = node_arg(node, 3, "attn_mask") is not None
+
+        elif target == "multi_head_attention_forward":
+            attrs["embed_dim"] = jsonable(node_arg(node, 3, "embed_dim_to_check"))
+            attrs["num_heads"] = jsonable(node_arg(node, 4, "num_heads"))
+            attrs["add_zero_attn"] = jsonable(node_arg(node, 9, "add_zero_attn", False))
+            attrs["dropout_p"] = jsonable(node_arg(node, 10, "dropout_p", 0.0))
+            attrs["training"] = jsonable(node_arg(node, 13, "training", True))
+            attrs["has_key_padding_mask"] = node_arg(node, 14, "key_padding_mask") is not None
+            attrs["need_weights"] = jsonable(node_arg(node, 15, "need_weights", True))
+            attrs["has_attn_mask"] = node_arg(node, 16, "attn_mask") is not None
+            attrs["use_separate_proj_weight"] = jsonable(node_arg(node, 17, "use_separate_proj_weight", False))
+            attrs["average_attn_weights"] = jsonable(node_arg(node, 24, "average_attn_weights", True))
+            attrs["is_causal"] = jsonable(node_arg(node, 25, "is_causal", False))
+
+        elif "attention" in target or "flash" in target:
+            attrs["kwargs"] = jsonable(node.kwargs)
 
         elif node.kwargs:
             attrs["kwargs"] = jsonable(node.kwargs)
@@ -357,6 +444,16 @@ def formula_for(node: fx.Node, label: str, module_label: str | None = None, attr
         return "take average value over each pooling window"
     if name == "Embedding":
         return "lookup embedding vectors by index"
+    if name == "MultiheadAttention":
+        return "project Q/K/V, apply scaled dot-product attention across heads, then project output"
+    if name == "TransformerEncoderLayer":
+        return "self-attention plus feed-forward block with residual connections and layer normalization"
+    if name == "TransformerDecoderLayer":
+        return "self-attention, cross-attention, and feed-forward block with residual connections and layer normalization"
+    if name == "TransformerEncoder":
+        return "stack of Transformer encoder layers"
+    if name == "TransformerDecoder":
+        return "stack of Transformer decoder layers"
 
     if node.op == "call_method":
         if node.target == "permute":
@@ -381,6 +478,13 @@ def formula_for(node: fx.Node, label: str, module_label: str | None = None, attr
             return "flatten tensor dimensions"
         if node.target in {torch.relu, torch.nn.functional.relu}:
             return "y = max(0, x)"
+        target = callable_name(node.target)
+        if target == "scaled_dot_product_attention":
+            return "softmax((QK^T * scale) + mask) V"
+        if target == "multi_head_attention_forward":
+            return "project Q/K/V, run multi-head scaled dot-product attention, project output"
+        if "attention" in target or "flash" in target:
+            return "optimized scaled dot-product attention kernel"
         if node.target == operator.add:
             return "y = a + b"
         if node.target == operator.mul:
